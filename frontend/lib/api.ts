@@ -28,7 +28,15 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new Error(body.detail || `Request failed: ${response.status}`);
+    let message = `Request failed: ${response.status}`;
+    if (typeof body.detail === "string") {
+      message = body.detail;
+    } else if (Array.isArray(body.detail)) {
+      message = body.detail
+        .map((e: any) => `${e.loc?.slice(-1)[0] ?? "field"}: ${e.msg}`)
+        .join("; ");
+    }
+    throw new Error(message);
   }
 
   return response.json();

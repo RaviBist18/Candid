@@ -1,15 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { apiFetch } from "@/lib/api";
 import {
   ArrowLeft,
   ArrowRight,
   Code2,
   Link2,
-  Upload,
-  X,
   Check,
   FileText,
   Target,
@@ -17,11 +16,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-// ---- Replace with real data from /sources/status ----
-const sourceStatus = {
-  github: { connected: true, username: "ravibist178" },
-  linkedin: { connected: true },
-};
+type SourceStatus = { connected: boolean; username?: string };
 
 const STEPS = [
   { number: 1, label: "Sources" },
@@ -79,46 +74,103 @@ export default function AnalyzePage() {
   const [step, setStep] = useState(1);
   const totalSteps = 3;
 
-  // Step 1 state
-  const [resumeFile, setResumeFile] = useState<File | null>(null);
+  // Real source status, loaded from backend (GitHub + LinkedIn live in /sources)
+  const [githubStatus, setGithubStatus] = useState<SourceStatus>({
+    connected: false,
+  });
+  const [linkedinStatus, setLinkedinStatus] = useState<SourceStatus>({
+    connected: false,
+  });
+  const [loadingSources, setLoadingSources] = useState(true);
+  const [phase, setPhase] = useState<"form" | "processing">("form");
+  const [analysisId, setAnalysisId] = useState<string | null>(null);
+  const [analysisStatus, setAnalysisStatus] = useState<string>("pending");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+
+  useEffect(() => {
+    apiFetch("/sources")
+      .then((data: any[]) => {
+        const gh = data.find((s) => s.source_type === "github");
+        const li = data.find((s) => s.source_type === "linkedin");
+        setGithubStatus(
+          gh
+            ? { connected: true, username: gh.raw_data.username }
+            : { connected: false },
+        );
+        setLinkedinStatus(li ? { connected: true } : { connected: false });
+      })
+      .finally(() => setLoadingSources(false));
+  }, []);
+  useEffect(() => {
+    if (phase !== "processing" || !analysisId) return;
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const analysis = await apiFetch(`/analyses/${analysisId}`);
+        if (cancelled) return;
+
+        if (analysis.status === "failed") {
+          setSubmitError(
+            analysis.error_message || "Analysis failed. Try again.",
+          );
+          setPhase("form");
+          setSubmitting(false);
+          return;
+        }
+
+        setAnalysisStatus(analysis.status);
+
+        if (analysis.status === "completed") {
+          router.push(`/report/${analysisId}`);
+          return;
+        }
+
+        setTimeout(poll, 2000);
+      } catch (e: any) {
+        if (!cancelled) {
+          setSubmitError(e.message || "Something went wrong. Try again.");
+          setPhase("form");
+          setSubmitting(false);
+        }
+      }
+    }
+
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [phase, analysisId, router]);
+
+  // Step 1 state — resume + portfolio, entered fresh per analysis (not saved to sources)
   const [resumeText, setResumeText] = useState("");
-  const [resumeDragActive, setResumeDragActive] = useState(false);
   const [portfolioUrl, setPortfolioUrl] = useState("");
 
   // Step 2 state
   const [jobDescription, setJobDescription] = useState("");
 
-  // Step 3 state
-  const [submitting, setSubmitting] = useState(false);
-
-  const canGoNextFromStep1 = resumeFile || resumeText.trim().length > 0;
+  const canGoNextFromStep1 = resumeText.trim().length > 0;
   const canGoNextFromStep2 = jobDescription.trim().length > 0;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     setSubmitting(true);
-    // ⚠️ TEMP MOCK — remove this block and uncomment real fetch below before backend testing
-    setTimeout(() => {
-      router.push("/report/a1");
-    }, 1500);
-
-    // ---- REAL FETCH (uncomment when backend ready) ----
-    // async function submit() {
-    //   try {
-    //     const res = await apiFetch("/analyze", {
-    //       method: "POST",
-    //       body: JSON.stringify({
-    //         resumeText,
-    //         portfolioUrl,
-    //         jobDescription,
-    //       }),
-    //     });
-    //     router.push(`/report/${res.analysis_id}`);
-    //   } catch (e: any) {
-    //     setSubmitting(false);
-    //     // TODO: show error state
-    //   }
-    // }
-    // submit();
+    setSubmitError("");
+    try {
+      const res = await apiFetch("/analyses", {
+        method: "POST",
+        body: JSON.stringify({
+          job_description: jobDescription,
+          resume_text: resumeText,
+          portfolio_url: portfolioUrl || null,
+        }),
+      });
+      setAnalysisId(res.id);
+      setPhase("processing");
+    } catch (e: any) {
+      setSubmitting(false);
+      setSubmitError(e.message || "Failed to start analysis. Try again.");
+    }
   }
 
   return (
@@ -149,7 +201,7 @@ export default function AnalyzePage() {
       {/* STEP 1 — SOURCES */}
       {step === 1 && (
         <div className="flex flex-col gap-5">
-          {/* Read-only status chips */}
+          {/* Real status chips — GitHub + LinkedIn come from /sources */}
           <div className="flex flex-wrap gap-2.5">
             <div className="flex items-center gap-2 border border-border bg-surface rounded-full pl-1.5 pr-3.5 py-1.5">
               <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10">
@@ -157,16 +209,18 @@ export default function AnalyzePage() {
               </div>
               <span className="text-xs font-medium text-text">
                 <span className="text-text-muted">GitHub</span>
-                {sourceStatus.github.connected && (
-                  <span className="text-text-muted"> · </span>
+                {githubStatus.connected && (
+                  <span className="text-text-muted"> &middot; </span>
                 )}
-                {sourceStatus.github.connected && sourceStatus.github.username}
+                {githubStatus.connected && githubStatus.username}
               </span>
-              {sourceStatus.github.connected ? (
+              {loadingSources ? (
+                <Loader2 size={13} className="animate-spin text-text-muted" />
+              ) : githubStatus.connected ? (
                 <Check size={13} className="text-primary" />
               ) : (
                 <Link
-                  href="/settings"
+                  href="/sources"
                   className="text-xs text-primary hover:underline font-medium"
                 >
                   Connect
@@ -180,16 +234,18 @@ export default function AnalyzePage() {
               </div>
               <span className="text-xs font-medium text-text">
                 <span className="text-text-muted">LinkedIn</span>
-                {sourceStatus.linkedin.connected && (
-                  <span className="text-text-muted"> · </span>
+                {linkedinStatus.connected && (
+                  <span className="text-text-muted"> &middot; </span>
                 )}
-                {sourceStatus.linkedin.connected && "Profile added"}
+                {linkedinStatus.connected && "Profile added"}
               </span>
-              {sourceStatus.linkedin.connected ? (
+              {loadingSources ? (
+                <Loader2 size={13} className="animate-spin text-text-muted" />
+              ) : linkedinStatus.connected ? (
                 <Check size={13} className="text-primary" />
               ) : (
                 <Link
-                  href="/settings"
+                  href="/sources"
                   className="text-xs text-primary hover:underline font-medium"
                 >
                   Add
@@ -198,87 +254,31 @@ export default function AnalyzePage() {
             </div>
           </div>
 
-          {/* Resume — primary input */}
+          {/* Resume — fresh per analysis, not saved */}
           <div className="bg-surface border border-border rounded-xl shadow-card p-5">
             <div className="flex items-center gap-3 mb-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
                 <FileText size={16} className="text-primary" />
               </div>
-              <p className="text-sm font-medium text-text">Resume</p>
-            </div>
-
-            {resumeFile ? (
-              <div className="flex items-center justify-between gap-2 border border-border rounded-lg px-3 py-3 text-sm text-text mb-3">
-                <span className="flex items-center gap-2 truncate">
-                  <Upload size={16} className="text-primary shrink-0" />
-                  {resumeFile.name}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setResumeFile(null)}
-                  className="shrink-0 text-text-muted hover:text-danger transition-colors"
-                  aria-label="Remove file"
-                >
-                  <X size={16} />
-                </button>
+              <div>
+                <p className="text-sm font-medium text-text">Resume</p>
+                <p className="text-xs text-text-muted">
+                  Paste the version you&apos;re using for this specific
+                  application.
+                </p>
               </div>
-            ) : (
-              <label
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  setResumeDragActive(true);
-                }}
-                onDragLeave={() => setResumeDragActive(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setResumeDragActive(false);
-                  const file = e.dataTransfer.files?.[0];
-                  if (
-                    file &&
-                    (file.type === "application/pdf" ||
-                      file.type ===
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                  ) {
-                    setResumeFile(file);
-                  }
-                }}
-                className={`flex flex-col items-center justify-center gap-1.5 border border-dashed rounded-lg px-3 py-6 text-sm transition-colors cursor-pointer mb-3 ${
-                  resumeDragActive
-                    ? "border-primary bg-primary/5 text-primary"
-                    : "border-border text-text-muted hover:border-primary hover:text-primary"
-                }`}
-              >
-                <Upload size={18} />
-                <span className="font-medium">
-                  Upload PDF or DOCX, or drag & drop
-                </span>
-                <input
-                  type="file"
-                  accept=".pdf,.docx"
-                  className="hidden"
-                  onChange={(e) => setResumeFile(e.target.files?.[0] ?? null)}
-                />
-              </label>
-            )}
-
-            <div className="flex items-center gap-3 mb-3">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
-                Or
-              </span>
-              <div className="h-px flex-1 bg-border" />
             </div>
 
             <textarea
               value={resumeText}
               onChange={(e) => setResumeText(e.target.value)}
               placeholder="Paste your resume text here..."
-              rows={3}
+              rows={8}
               className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
             />
           </div>
 
-          {/* Portfolio — optional input */}
+          {/* Portfolio — fresh per analysis, not saved */}
           <div className="bg-surface border border-border rounded-xl shadow-card p-5">
             <div className="flex items-center gap-3 mb-2">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
@@ -343,7 +343,7 @@ export default function AnalyzePage() {
       )}
 
       {/* STEP 3 — REVIEW */}
-      {step === 3 && (
+      {step === 3 && phase === "form" && (
         <div className="flex flex-col gap-5">
           <div className="bg-surface border border-border rounded-xl shadow-card overflow-hidden">
             <div className="px-5 py-3.5 border-b border-border flex items-center justify-between">
@@ -360,9 +360,9 @@ export default function AnalyzePage() {
                   <Code2 size={14} /> GitHub
                 </span>
                 <span className="flex items-center gap-1.5 text-sm text-text font-medium">
-                  {sourceStatus.github.connected ? (
+                  {githubStatus.connected ? (
                     <>
-                      {sourceStatus.github.username}
+                      {githubStatus.username}
                       <Check size={13} className="text-primary" />
                     </>
                   ) : (
@@ -375,7 +375,7 @@ export default function AnalyzePage() {
                   <Link2 size={14} /> LinkedIn
                 </span>
                 <span className="flex items-center gap-1.5 text-sm text-text font-medium">
-                  {sourceStatus.linkedin.connected ? (
+                  {linkedinStatus.connected ? (
                     <>
                       Added
                       <Check size={13} className="text-primary" />
@@ -390,11 +390,7 @@ export default function AnalyzePage() {
                   <FileText size={14} /> Resume
                 </span>
                 <span className="text-sm text-text font-medium truncate max-w-[60%]">
-                  {resumeFile
-                    ? resumeFile.name
-                    : resumeText
-                      ? "Pasted text"
-                      : "Not provided"}
+                  {resumeText ? "Pasted text" : "Not provided"}
                 </span>
               </div>
               <div className="px-5 py-3.5 flex items-center justify-between">
@@ -416,6 +412,12 @@ export default function AnalyzePage() {
             </div>
           </div>
 
+          {submitError && (
+            <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+              {submitError}
+            </div>
+          )}
+
           <div className="flex items-start gap-2.5 border border-border rounded-lg px-4 py-3 bg-surface">
             <ShieldCheck size={16} className="text-primary shrink-0 mt-0.5" />
             <p className="text-xs text-text-muted leading-relaxed">
@@ -426,51 +428,73 @@ export default function AnalyzePage() {
         </div>
       )}
 
-      {/* NAVIGATION */}
-      <div className="flex items-center justify-between">
-        {step > 1 ? (
-          <button
-            type="button"
-            onClick={() => setStep((s) => s - 1)}
-            className="text-sm font-semibold text-text-muted hover:text-text transition-colors px-4 py-2.5"
-          >
-            Back
-          </button>
-        ) : (
-          <span />
-        )}
+      {phase === "processing" && (
+        <div className="bg-surface border border-border rounded-xl shadow-card flex flex-col items-center justify-center gap-4 py-16 text-center">
+          <div className="relative flex h-16 w-16 items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-4 border-border" />
+            <div className="absolute inset-0 rounded-full border-4 border-primary border-t-transparent animate-spin" />
+            <Target size={22} className="text-primary" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-text">
+              {analysisStatus === "processing"
+                ? "Analyzing your profile against the JD..."
+                : "Starting analysis..."}
+            </p>
+            <p className="text-xs text-text-muted mt-1.5">
+              This usually takes under a minute. Stay on this page.
+            </p>
+          </div>
+        </div>
+      )}
 
-        {step < totalSteps ? (
-          <button
-            type="button"
-            disabled={step === 1 ? !canGoNextFromStep1 : !canGoNextFromStep2}
-            onClick={() => setStep((s) => s + 1)}
-            className="flex items-center gap-2 bg-primary text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Next
-            <ArrowRight size={16} />
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={submitting}
-            className="flex items-center gap-2 bg-primary text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm hover:bg-primary-hover transition-colors disabled:opacity-60"
-          >
-            {submitting ? (
-              <>
-                <Loader2 size={16} className="animate-spin" />
-                Starting Analysis...
-              </>
-            ) : (
-              <>
-                <Target size={16} />
-                Start Analysis
-              </>
-            )}
-          </button>
-        )}
-      </div>
+      {/* NAVIGATION */}
+      {phase === "form" && (
+        <div className="flex items-center justify-between">
+          {step > 1 ? (
+            <button
+              type="button"
+              onClick={() => setStep((s) => s - 1)}
+              className="text-sm font-semibold text-text-muted hover:text-text transition-colors px-4 py-2.5"
+            >
+              Back
+            </button>
+          ) : (
+            <span />
+          )}
+
+          {step < totalSteps ? (
+            <button
+              type="button"
+              disabled={step === 1 ? !canGoNextFromStep1 : !canGoNextFromStep2}
+              onClick={() => setStep((s) => s + 1)}
+              className="flex items-center gap-2 bg-primary text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Next
+              <ArrowRight size={16} />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={submitting}
+              className="flex items-center gap-2 bg-primary text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm hover:bg-primary-hover transition-colors disabled:opacity-60"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Starting Analysis...
+                </>
+              ) : (
+                <>
+                  <Target size={16} />
+                  Start Analysis
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

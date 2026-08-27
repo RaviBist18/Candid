@@ -413,157 +413,31 @@ export default function ReportPage() {
   const [active, setActive] = useState("projects");
 
   useEffect(() => {
-    // ⚠️ TEMP MOCK — remove this block and uncomment real fetch below before backend testing
-    setReport({
-      id: "mock-report-1",
-      analysis_id: analysisId,
-      missing_projects: [
-        {
-          title: "REST API with Authentication & Automated Tests",
-          tagline: "Build it as a Task Manager, Booking System, or Content API",
-          reasons: [
-            "Demonstrates secure auth flow implementation, currently missing from your project history",
-            "Shows testing discipline — an area recruiters flag early when absent",
-            "Fills a common gap between scripting-level and production-level backend work",
-          ],
-          estimated_time: "~1 week",
-        },
-        {
-          title: "Dockerized Service with CI Pipeline",
-          tagline:
-            "Containerize an Existing Project with an Automated CI/CD Pipeline",
-          reasons: [
-            "Containerization is a widely expected skill for backend roles at this level",
-            "Automated pipelines show ownership beyond just writing code",
-            "No current repo shows a Dockerfile or working CI config",
-          ],
-          estimated_time: "~4-5 days",
-        },
-      ],
-      skill_gaps: [
-        {
-          skill: "PostgreSQL",
-          why_it_matters: [
-            "Expected as production-grade relational database experience for this role",
-            "Your current projects only show SQLite/Mongo, not a relational data model",
-            "Query design and scaling patterns are common interview topics for this skill",
-          ],
-        },
-        {
-          skill: "CI/CD (GitHub Actions)",
-          why_it_matters: [
-            "Automated build/test/deploy pipelines are standard practice at this level",
-            "No pipeline history currently shown across your projects",
-            "Demonstrates you can ship code safely without manual steps",
-          ],
-        },
-        {
-          skill: "Docker",
-          why_it_matters: [
-            "Now treated as assumed knowledge for backend roles",
-            "Signals you can package and run an app consistently across environments",
-            "Not demonstrated anywhere in your current project history",
-          ],
-        },
-      ],
-      ats_issues: [
-        {
-          issue: "No dedicated Skills section",
-          fix: [
-            "Add a standalone Skills section listing key tools and languages",
-            "ATS parsers scan for this section specifically — without it, real skills can go undetected",
-            "Keep it a simple list, not paragraph form, for reliable parsing",
-          ],
-        },
-        {
-          issue: "Non-standard job titles",
-          fix: [
-            "Rename titles to common industry terms, e.g. 'Software Engineer' instead of internal team names",
-            "ATS and recruiters both filter/search by standard title keywords",
-            "Internal titles can cause a strong candidate to get filtered out before a human sees the resume",
-          ],
-        },
-      ],
-    });
+    let cancelled = false;
 
-    // roadmap items now tagged with project_title — 2 projects, 3 items each
-    setRoadmap([
-      // Project 1: REST API with Authentication & Automated Tests
-      {
-        id: "r1",
-        project_title: "REST API with Authentication & Automated Tests",
-        title: "Set up the basic project structure",
-        description:
-          "Create the folders, routes, and database connection your API will run on.",
-        is_checked: true,
-        order_index: 1,
-      },
-      {
-        id: "r2",
-        project_title: "REST API with Authentication & Automated Tests",
-        title: "Add login and authentication",
-        description:
-          "Let users securely log in, and use refresh tokens so they stay logged in safely.",
-        is_checked: true,
-        order_index: 2,
-      },
-      {
-        id: "r3",
-        project_title: "REST API with Authentication & Automated Tests",
-        title: "Write automated tests for the whole app",
-        description:
-          "Cover the auth flow and core routes so bugs get caught before they reach users.",
-        is_checked: false,
-        order_index: 3,
-      },
-      // Project 2: Dockerized Service with CI Pipeline
-      {
-        id: "r4",
-        project_title: "Dockerized Service with CI Pipeline",
-        title: "Write a Dockerfile for an existing project",
-        description:
-          "Package one of your existing repos so it runs the same way on any machine or server.",
-        is_checked: false,
-        order_index: 1,
-      },
-      {
-        id: "r5",
-        project_title: "Dockerized Service with CI Pipeline",
-        title: "Verify the container locally",
-        description:
-          "Build and run the image locally, confirm it behaves the same as your dev environment.",
-        is_checked: false,
-        order_index: 2,
-      },
-      {
-        id: "r6",
-        project_title: "Dockerized Service with CI Pipeline",
-        title: "Automate build and deploy with GitHub Actions",
-        description:
-          "Set up a pipeline so tests run and the image builds automatically on every push.",
-        is_checked: false,
-        order_index: 3,
-      },
-    ]);
-    setChatMessages([]);
-    setLoading(false);
+    async function fetchReport() {
+      try {
+        const r = await apiFetch(`/reports/by-analysis/${analysisId}`);
+        const items = await apiFetch(`/reports/${r.id}/roadmap`);
+        const messages = await apiFetch(`/reports/${r.id}/chat`);
+        if (!cancelled) {
+          setReport(r);
+          setRoadmap(items);
+          setChatMessages(messages);
+          setLoading(false);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setError(e.message);
+          setLoading(false);
+        }
+      }
+    }
 
-    // ---- REAL FETCH (uncomment when backend ready) ----
-    // async function load() {
-    //   try {
-    //     const r = await apiFetch(`/reports/by-analysis/${analysisId}`);
-    //     setReport(r);
-    //     const items = await apiFetch(`/reports/${r.id}/roadmap`); // must include project_title per item
-    //     setRoadmap(items);
-    //     const messages = await apiFetch(`/reports/${r.id}/chat`);
-    //     setChatMessages(messages);
-    //   } catch (e: any) {
-    //     setError(e.message);
-    //   } finally {
-    //     setLoading(false);
-    //   }
-    // }
-    // load();
+    fetchReport();
+    return () => {
+      cancelled = true;
+    };
   }, [analysisId]);
 
   useEffect(() => {
@@ -609,35 +483,18 @@ export default function ReportPage() {
     };
     setChatMessages((prev) => [...prev, userMsg]);
 
-    // ⚠️ TEMP MOCK — remove this block and uncomment real fetch below before backend testing
-    setTimeout(() => {
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: `mock-${Date.now()}`,
-          role: "assistant",
-          content:
-            "This is a mock response — real backend chat isn't wired yet. Your question was: \"" +
-            content +
-            '"',
-        },
-      ]);
+    try {
+      await apiFetch(`/reports/${report.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      });
+      const messages = await apiFetch(`/reports/${report.id}/chat`);
+      setChatMessages(messages);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
       setChatSending(false);
-    }, 700);
-
-    // ---- REAL FETCH (uncomment when backend ready) ----
-    // try {
-    //   await apiFetch(`/reports/${report.id}/chat`, {
-    //     method: "POST",
-    //     body: JSON.stringify({ content }),
-    //   });
-    //   const messages = await apiFetch(`/reports/${report.id}/chat`);
-    //   setChatMessages(messages);
-    // } catch (e: any) {
-    //   setError(e.message);
-    // } finally {
-    //   setChatSending(false);
-    // }
+    }
   }
 
   function handleResetChat() {
@@ -648,7 +505,7 @@ export default function ReportPage() {
   if (loading) {
     return (
       <div className="mx-auto max-w-3xl w-full py-16 text-center text-sm text-text-muted">
-        Loading report...
+        Loading your report...
       </div>
     );
   }

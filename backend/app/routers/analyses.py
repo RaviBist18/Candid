@@ -33,6 +33,8 @@ def create_analysis(
     payload = {
         "user_id": user_id,
         "job_description": analysis.job_description,
+        "resume_text": analysis.resume_text,
+        "portfolio_url": analysis.portfolio_url,
         "status": "pending",
     }
     result = supabase.table("analyses").insert(payload).execute()
