@@ -1,6 +1,10 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import NotificationDropdown from "@/components/NotificationDropdown";
 import AvatarDropdown from "@/components/AvatarDropdown";
+import { createClient } from "@/lib/supabase-browser";
 
 export function CandidLogo({ size = 26 }: { size?: number }) {
   return (
@@ -24,6 +28,30 @@ export function CandidLogo({ size = 26 }: { size?: number }) {
 }
 
 export default function Header() {
+  const [user, setUser] = useState<{
+    name: string;
+    email: string;
+    avatarUrl?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      if (!data.user) return;
+      const meta = data.user.user_metadata || {};
+      setUser({
+        name:
+          meta.user_name ||
+          meta.full_name ||
+          meta.name ||
+          data.user.email ||
+          "User",
+        email: data.user.email || "",
+        avatarUrl: meta.avatar_url,
+      });
+    });
+  }, []);
+
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-surface">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
@@ -38,8 +66,13 @@ export default function Header() {
           <NotificationDropdown />
           <div className="w-px h-6 bg-border" />
           <div className="flex items-center gap-1">
-            {/* TODO: replace hardcoded name/email with real session data once auth wired */}
-            <AvatarDropdown name="Ravi@58" email="ravibist178@gmail.com" />
+            {user && (
+              <AvatarDropdown
+                name={user.name}
+                email={user.email}
+                avatarUrl={user.avatarUrl}
+              />
+            )}
           </div>
         </div>
       </div>
