@@ -1,0 +1,221 @@
+"use client";
+
+import Link from "next/link";
+import {
+  Target,
+  Sparkles,
+  Plus,
+  ArrowRight,
+  Clock,
+  FileCheck2,
+  BarChart3,
+  Map,
+  SearchCheck,
+  FileText,
+  MessageCircleQuestion,
+} from "lucide-react";
+
+// ---- Replace with real data from /analyses and /sources/status ----
+const dashboardData = {
+  userName: "Alex",
+  aiInsight:
+    "Your last 3 analyses show a recurring gap: containerization. Consider prioritizing that next.",
+  mostRecentAnalysis: {
+    id: "a1",
+    role: "Senior Backend Engineer",
+    timeAgo: "2 days ago",
+  },
+  latestAtsScore: 82,
+  totalAnalyses: 12,
+  totalAnalysesThisMonth: 2,
+};
+
+export default function DashboardPage() {
+  return (
+    <>
+      {/* HERO SECTION (Quick Action & Insights) */}
+      <section className="relative rounded-xl">
+        <div className="flex flex-col mt-1 gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-text">
+              Welcome back, {dashboardData.userName}.
+            </h1>
+            <p className="mt-1 text-sm text-text-muted">
+              Here is an overview of your career analysis and roadmap progress.
+            </p>
+          </div>
+          <Link
+            href="/analyze"
+            className="flex shrink-0 items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover"
+          >
+            <Target size={16} />
+            Initiate New Analysis
+          </Link>
+        </div>
+
+        <div className="mt-6 border-t border-border pt-6">
+          <div className="flex items-center gap-4 rounded-xl border border-border bg-background px-5 py-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary">
+              <Sparkles size={18} className="text-white" />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-primary">
+                AI Analysis
+              </p>
+              <p className="mt-0.5 text-sm text-text">
+                {dashboardData.aiInsight}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* COMPACT STATS ROW */}
+        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+          {/* Total Analyses Card */}
+          <Link
+            href="/analyses"
+            className="border border-border p-4 rounded-xl flex flex-col gap-2.5 hover:bg-gray-50 transition-colors group"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+              <BarChart3 size={18} className="text-primary" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Total Analyses
+              </h3>
+              <p className="mt-1.5 text-2xl font-bold text-text">
+                {dashboardData.totalAnalyses}
+              </p>
+              <p className="text-sm text-text-muted">
+                +{dashboardData.totalAnalysesThisMonth} this month
+              </p>
+            </div>
+          </Link>
+
+          {/* Most Recent Analysis Card */}
+          <Link
+            href={`/report/${dashboardData.mostRecentAnalysis.id}`}
+            className="border border-border p-4 rounded-xl flex flex-col gap-2.5 hover:bg-gray-50 transition-colors group"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+              <Clock size={18} className="text-primary" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Most Recent Analysis
+              </h3>
+              <p className="mt-1.5 font-bold text-lg text-text truncate">
+                {dashboardData.mostRecentAnalysis.role}
+              </p>
+              <p className="text-sm text-text-muted">
+                {dashboardData.mostRecentAnalysis.timeAgo}
+              </p>
+            </div>
+          </Link>
+
+          {/* Latest ATS Score Card */}
+          <Link
+            href={`/report/${dashboardData.mostRecentAnalysis.id}/ats-score`}
+            className="border border-border p-4 rounded-xl flex flex-col gap-2.5 hover:bg-gray-50 transition-colors group"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
+              <FileCheck2 size={18} className="text-primary" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted">
+                Latest ATS Score
+              </h3>
+              <p className="mt-1.5 font-bold text-lg text-text">
+                {dashboardData.latestAtsScore}/100
+              </p>
+              <p className="text-sm text-text-muted truncate">
+                {dashboardData.mostRecentAnalysis.role}
+              </p>
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      {/* WHAT NOW SECTION */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-lg w-full items-start">
+        {/* Dark Blue Action Block */}
+        <div className="bg-primary rounded-xl flex flex-col justify-center items-center text-center gap-4 h-full min-h-[300px] p-8 shadow-card">
+          <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-2">
+            <Target size={32} className="text-white" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-2xl font-bold text-white">
+              Ready for your next move?
+            </h2>
+            <p className="text-sm text-white/80">
+              Start a deep-dive analysis of your current skills against market
+              demand.
+            </p>
+          </div>
+          <Link
+            href="/analyze"
+            className="mt-6 bg-white text-primary px-5 py-3 rounded-lg text-sm font-semibold hover:bg-gray-100 transition-transform hover:-translate-y-0.5 flex items-center gap-2"
+          >
+            <Plus size={16} />
+            Start Mapping
+          </Link>
+        </div>
+
+        {/* What Now list */}
+        <section className="flex flex-col gap-3 w-full">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1">
+            What now?
+          </h3>
+          <div className="flex flex-col gap-3">
+            {[
+              {
+                title: "Continue Roadmap",
+                desc: "View the critical learning path to secure Senior Engineering roles.",
+                href: "/roadmap",
+                icon: Map,
+              },
+              {
+                title: "Skill Gap Analysis",
+                desc: "Identify critical technical areas for your next role.",
+                href: "/skill-gaps",
+                icon: SearchCheck,
+              },
+              {
+                title: "View Sample Report",
+                desc: "See a full example analysis to understand the depth of insights.",
+                href: "/sample-report",
+                icon: FileText,
+              },
+              {
+                title: "Ask a Question",
+                desc: "Get instant AI guidance on your career path.",
+                href: "/ask",
+                icon: MessageCircleQuestion,
+              },
+            ].map((item) => (
+              <Link
+                key={item.title}
+                href={item.href}
+                className="border border-border bg-surface rounded-lg p-4 flex items-center gap-4 text-left hover:border-primary transition-colors shadow-card group"
+              >
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                  <item.icon size={16} className="text-primary" />
+                </div>
+                <div className="flex flex-col gap-1 flex-1">
+                  <span className="font-semibold text-text">{item.title}</span>
+                  <span className="text-sm text-text-muted mt-0.5">
+                    {item.desc}
+                  </span>
+                </div>
+                <ArrowRight
+                  size={18}
+                  className="shrink-0 text-text-muted transition-transform group-hover:translate-x-0.5 group-hover:text-primary"
+                />
+              </Link>
+            ))}
+          </div>
+        </section>
+      </div>
+    </>
+  );
+}

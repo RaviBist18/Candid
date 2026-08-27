@@ -1,0 +1,15 @@
+name: CI
+
+# Placeholder — real test/lint jobs wired in Phase 12 (Testing).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  placeholder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "CI scaffold — real jobs added in Phase 12"
