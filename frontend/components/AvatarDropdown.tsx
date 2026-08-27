@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect } from "react";
 import { Settings, HelpCircle, LogOut, ChevronDown } from "lucide-react";
 import Link from "next/link";
+import { createClient } from "@/lib/supabase-browser";
+import { useRouter } from "next/navigation";
 
 type Props = {
   name: string;
@@ -13,6 +15,8 @@ type Props = {
 export default function AvatarDropdown({ name, email, avatarUrl }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const supabase = createClient();
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -23,9 +27,11 @@ export default function AvatarDropdown({ name, email, avatarUrl }: Props) {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  function handleLogout() {
+  async function handleLogout() {
     setOpen(false);
-    // TODO: wire to Supabase auth.signOut(), redirect to /login
+    await supabase.auth.signOut();
+    router.push("/login");
+    router.refresh();
   }
 
   return (
