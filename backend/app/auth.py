@@ -1,32 +1,64 @@
 """
-Auth dependency — verifies the Supabase session JWT sent by the frontend
-in the Authorization header, and returns the real authenticated user_id.
-
-Every protected route uses: user_id: str = Depends(get_current_user)
-This REPLACES the temporary `user_id: str` query param used in Phase 3.
+Auth dependency — verifies the Supabase session JWT locally via JWKS
+(ES256), no network call to Supabase per request. JWKS cached 1hr.
 """
+
+import os
+import time
+import httpx
+import jwt
 from fastapi import Header, HTTPException
-from .db import supabase
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+
+_jwks_cache: dict = {}
+_jwks_cached_at: float = 0
+JWKS_CACHE_TTL = 3600
+
+
+def _get_jwks() -> dict:
+    global _jwks_cache, _jwks_cached_at
+    now = time.time()
+    if _jwks_cache and (now - _jwks_cached_at) < JWKS_CACHE_TTL:
+        return _jwks_cache
+    resp = httpx.get(JWKS_URL, timeout=10)
+    resp.raise_for_status()
+    _jwks_cache = resp.json()
+    _jwks_cached_at = now
+    return _jwks_cache
 
 
 def get_current_user(authorization: str = Header(...)) -> str:
-    """
-    Expects header: Authorization: Bearer <supabase_access_token>
-    Verifies the token against Supabase Auth (network call — acceptable
-    at <100 user scale per locked Phase 0.5 decision; revisit caching
-    in Phase 14 if scale changes).
-    """
     if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        raise HTTPException(
+            status_code=401, detail="Missing or invalid Authorization header"
+        )
 
     token = authorization.removeprefix("Bearer ").strip()
 
     try:
-        user_response = supabase.auth.get_user(token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        headers = jwt.get_unverified_header(token)
+    except jwt.DecodeError:
+        raise HTTPException(status_code=401, detail="Invalid token format")
 
-    if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    jwks = _get_jwks()
+    kid = headers.get("kid")
+    key = None
+    for k in jwks.get("keys", []):
+        if k.get("kid") == kid:
+            key = jwt.algorithms.ECAlgorithm.from_jwk(k)
+            break
+    if not key:
+        raise HTTPException(status_code=401, detail="Signing key not found")
 
-    return user_response.user.id
+    try:
+        payload = jwt.decode(
+            token, key, algorithms=["ES256"], options={"verify_aud": False}
+        )
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+
+    return payload["sub"]

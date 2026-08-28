@@ -3,8 +3,87 @@ AI Layer — gap-analysis pipeline + follow-up chat, backed by Groq.
 Structured JSON output maps directly to Report/RoadmapItem schema.
 """
 
+import re
+
 from .db import supabase
 from .groq_client import call_groq_json, GroqCallError
+
+
+_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "you",
+    "our",
+    "are",
+    "will",
+    "have",
+    "this",
+    "that",
+    "from",
+    "your",
+    "who",
+    "has",
+    "not",
+    "can",
+    "all",
+    "but",
+    "was",
+    "were",
+    "been",
+    "into",
+    "than",
+    "then",
+    "them",
+    "they",
+    "their",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "about",
+    "role",
+    "job",
+    "work",
+    "years",
+    "experience",
+    "team",
+    "strong",
+    "ability",
+    "skills",
+    "including",
+    "etc",
+    "using",
+    "use",
+    "years",
+    "year",
+    "looking",
+    "join",
+    "candidate",
+    "must",
+}
+
+
+def _compute_ats_score(resume_text: str, job_description: str) -> int:
+    """
+    Rough keyword-overlap ATS score — % of the JD's significant terms that
+    also appear in the resume text. Same core idea real ATS-checker tools
+    use (e.g. Jobscan): deterministic keyword matching, not an AI opinion.
+    """
+    if not resume_text or not job_description:
+        return 0
+
+    jd_words = re.findall(r"[a-zA-Z][a-zA-Z0-9+.#]{2,}", job_description.lower())
+    jd_keywords = {w for w in jd_words if w not in _STOPWORDS}
+    if not jd_keywords:
+        return 0
+
+    resume_lower = resume_text.lower()
+    matched = sum(1 for w in jd_keywords if w in resume_lower)
+
+    return round((matched / len(jd_keywords)) * 100)
 
 
 def _format_sources(sources: list[dict]) -> str:
@@ -120,6 +199,8 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
     try:
         result = call_groq_json(messages)
 
+        ats_score = _compute_ats_score(resume_text, job_description)
+
         report = (
             supabase.table("reports")
             .insert(
@@ -128,6 +209,7 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
                     "missing_projects": result.get("missing_projects", []),
                     "skill_gaps": result.get("skill_gaps", []),
                     "ats_issues": result.get("ats_issues", []),
+                    "ats_score": ats_score,
                 }
             )
             .execute()

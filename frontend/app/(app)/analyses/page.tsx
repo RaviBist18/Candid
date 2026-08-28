@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import {
@@ -13,12 +13,13 @@ import {
   Download,
   Trash2,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase-browser";
 
 type AnalysisRow = {
   id: string;
   job_title: string;
   created_at: string; // ISO
-  status: "completed" | "processing" | "failed";
+  status: "pending" | "completed" | "processing" | "failed";
   ats_score: number | null;
   roadmap_done: number;
   roadmap_total: number;
@@ -29,6 +30,11 @@ type Filter = (typeof FILTERS)[number];
 
 function StatusBadge({ status }: { status: AnalysisRow["status"] }) {
   const map = {
+    pending: {
+      icon: Loader2,
+      label: "Pending",
+      cls: "text-text-muted",
+    },
     completed: {
       icon: CheckCircle2,
       label: "Completed",
@@ -68,93 +74,103 @@ function formatDate(iso: string) {
 }
 
 export default function AnalysesPage() {
-  const [rows] = useState<AnalysisRow[]>([
-    // ⚠️ TEMP MOCK — remove and uncomment real fetch below before backend testing
-    {
-      id: "a1",
-      job_title: "Senior Backend Engineer",
-      created_at: "2026-08-23T10:00:00Z",
-      status: "completed",
-      ats_score: 82,
-      roadmap_done: 4,
-      roadmap_total: 6,
-    },
-    {
-      id: "a2",
-      job_title: "Platform Engineer, Infra",
-      created_at: "2026-08-19T10:00:00Z",
-      status: "completed",
-      ats_score: 76,
-      roadmap_done: 2,
-      roadmap_total: 5,
-    },
-    {
-      id: "a3",
-      job_title: "Full Stack Developer (Fintech)",
-      created_at: "2026-08-14T10:00:00Z",
-      status: "failed",
-      ats_score: null,
-      roadmap_done: 0,
-      roadmap_total: 0,
-    },
-    {
-      id: "a4",
-      job_title: "Backend Engineer, Payments",
-      created_at: "2026-08-08T10:00:00Z",
-      status: "processing",
-      ats_score: null,
-      roadmap_done: 0,
-      roadmap_total: 0,
-    },
-    {
-      id: "a5",
-      job_title: "Software Engineer II",
-      created_at: "2026-07-30T10:00:00Z",
-      status: "completed",
-      ats_score: 68,
-      roadmap_done: 6,
-      roadmap_total: 6,
-    },
-  ]);
+  const [rows, setRows] = useState<AnalysisRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  // ---- REAL FETCH (uncomment when backend ready) ----
-  // const [rows, setRows] = useState<AnalysisRow[]>([]);
-  // const [loading, setLoading] = useState(true);
-  // const [error, setError] = useState("");
-  // useEffect(() => {
-  //   async function load() {
-  //     try {
-  //       const data = await apiFetch(`/analyses`);
-  //       setRows(data);
-  //     } catch (e: any) {
-  //       setError(e.message);
-  //     } finally {
-  //       setLoading(false);
-  //     }
-  //   }
-  //   load();
-  // }, []);
+  useEffect(() => {
+    async function load() {
+      try {
+        const supabase = createClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!session) {
+          // Session not rehydrated yet on this render — auth listener below
+          // will retrigger load() once it's ready.
+          return;
+        }
+
+        const [data, progress] = await Promise.all([
+          apiFetch("/analyses"),
+          apiFetch("/analyses/roadmap-progress"),
+        ]);
+        const mapped: AnalysisRow[] = data.map((a: any) => {
+          const p = progress[a.id];
+          return {
+            id: a.id,
+            // job_title doesn't exist in the backend yet — fallback to a
+            // truncated job_description until that field is added.
+            job_title:
+              a.job_description.length > 60
+                ? a.job_description.slice(0, 60) + "..."
+                : a.job_description,
+            created_at: a.created_at,
+            status: a.status,
+            // ats_score still doesn't exist in backend — placeholder until
+            // that decision (Groq-generated vs computed) is made.
+            ats_score: null,
+            roadmap_done: p?.done ?? 0,
+            roadmap_total: p?.total ?? 0,
+          };
+        });
+        setRows(mapped);
+      } catch (e: any) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+
+    const supabase = createClient();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) load();
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("All");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
 
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+
+  function showToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 1000);
+  }
+
   function handleDownload(e: React.MouseEvent, id: string) {
     e.preventDefault();
     e.stopPropagation();
-    // ---- REAL FETCH (backend gap — no export endpoint yet) ----
-    // window.open(`/api/reports/${id}/export`, "_blank");
+    // Backend gap — no export endpoint yet, not built. Not clicking through.
     console.log("download report", id);
   }
 
-  function handleDelete(e: React.MouseEvent, id: string) {
+  function requestDelete(e: React.MouseEvent, id: string) {
     e.preventDefault();
     e.stopPropagation();
-    if (!confirm("Delete this analysis? This can't be undone.")) return;
-    // ---- REAL FETCH (backend gap — no delete endpoint yet) ----
-    // await apiFetch(`/analyses/${id}`, { method: "DELETE" });
-    console.log("delete analysis", id);
+    setDeleteTarget(id);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    const id = deleteTarget;
+    setDeleteTarget(null);
+    try {
+      await apiFetch(`/analyses/${id}`, { method: "DELETE" });
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      showToast("Analysis deleted.");
+    } catch (e: any) {
+      showToast(`Delete failed: ${e.message}`);
+    }
   }
 
   const failedCount = rows.filter((r) => r.status === "failed").length;
@@ -184,6 +200,15 @@ export default function AnalysesPage() {
     });
   }, [rows, query, filter, fromDate, toDate]);
 
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, filter, fromDate, toDate]);
+
   return (
     <div className="w-full flex flex-col gap-4">
       <Link
@@ -200,7 +225,11 @@ export default function AnalysesPage() {
         </span>
         <h1 className="mt-1.5 text-headline-lg text-text">Your Analyses</h1>
         <p className="mt-1.5 text-sm text-text-muted">
-          {rows.length} total, {filtered.length} shown
+          {loading
+            ? "Loading..."
+            : error
+              ? `Failed to load: ${error}`
+              : `${rows.length} total, ${filtered.length} shown`}
         </p>
       </div>
 
@@ -282,7 +311,12 @@ export default function AnalysesPage() {
 
       {/* Table */}
       <div className="bg-surface border border-border rounded-xl shadow-card overflow-hidden">
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-text-muted">
+            <Loader2 size={16} className="animate-spin" />
+            Loading your analyses...
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 px-6 text-center">
             <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10">
               <FileSearch size={19} className="text-primary" />
@@ -319,7 +353,7 @@ export default function AnalysesPage() {
             </div>
 
             <div className="divide-y divide-border">
-              {filtered.map((r) => (
+              {paginated.map((r) => (
                 <Link
                   key={r.id}
                   href={`/report/${r.id}`}
@@ -354,7 +388,7 @@ export default function AnalysesPage() {
                       type="button"
                       title="Delete analysis"
                       aria-label="Delete analysis"
-                      onClick={(e) => handleDelete(e, r.id)}
+                      onClick={(e) => requestDelete(e, r.id)}
                       className="p-1.5 text-text-muted hover:text-danger rounded-md transition-colors"
                     >
                       <Trash2 size={15} />
@@ -366,6 +400,83 @@ export default function AnalysesPage() {
           </>
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-2">
+          <button
+            type="button"
+            disabled={page === 1}
+            onClick={() => setPage((p) => p - 1)}
+            className="text-sm px-3 py-1.5 rounded-lg border border-border disabled:opacity-40 hover:bg-background transition-colors"
+          >
+            Prev
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPage(p)}
+              className={`text-sm w-8 h-8 rounded-lg transition-colors ${
+                p === page
+                  ? "bg-primary text-white"
+                  : "border border-border hover:bg-background"
+              }`}
+            >
+              {p}
+            </button>
+          ))}
+          <button
+            type="button"
+            disabled={page === totalPages}
+            onClick={() => setPage((p) => p + 1)}
+            className="text-sm px-3 py-1.5 rounded-lg border border-border disabled:opacity-40 hover:bg-background transition-colors"
+          >
+            Next
+          </button>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-white rounded-xl shadow-lg max-w-sm w-full p-6">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/10">
+                <Trash2 size={18} className="text-danger" />
+              </div>
+              <div>
+                <p className="font-semibold text-text">Delete this analysis?</p>
+                <p className="text-sm text-text-muted mt-0.5">
+                  This cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="flex-1 text-sm font-semibold px-4 py-2.5 rounded-lg border border-border hover:bg-background transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                className="flex-1 text-sm font-semibold px-4 py-2.5 rounded-lg bg-danger text-white hover:opacity-90 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="bg-primary rounded-xl shadow-lg max-w-sm w-full p-6 text-center">
+            <p className="text-sm font-medium text-white">{toast}</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

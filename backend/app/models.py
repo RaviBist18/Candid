@@ -50,6 +50,7 @@ class ReportOut(BaseModel):
     missing_projects: list
     skill_gaps: list
     ats_issues: list
+    ats_score: Optional[int] = None
     created_at: datetime
 
 
@@ -79,3 +80,9 @@ class ChatMessageOut(BaseModel):
     role: Literal["user", "assistant"]
     content: str
     created_at: datetime
+
+
+# ── Dashboard
+class InsightOut(BaseModel):
+    insight: str
+    has_analyses: bool

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   Target,
@@ -14,23 +15,140 @@ import {
   FileText,
   MessageCircleQuestion,
 } from "lucide-react";
+import { createClient } from "@/lib/supabase-browser";
+import { apiFetch } from "@/lib/api";
 
-// ---- Replace with real data from /analyses and /sources/status ----
-const dashboardData = {
-  userName: "Alex",
-  aiInsight:
-    "Your last 3 analyses show a recurring gap: containerization. Consider prioritizing that next.",
-  mostRecentAnalysis: {
-    id: "a1",
-    role: "Senior Backend Engineer",
-    timeAgo: "2 days ago",
-  },
-  latestAtsScore: 82,
-  totalAnalyses: 12,
-  totalAnalysesThisMonth: 2,
-};
+function timeAgo(dateStr: string): string {
+  const diffMs = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 export default function DashboardPage() {
+  const [userName, setUserName] = useState<string | null>(null);
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [hasAnalyses, setHasAnalyses] = useState<boolean | null>(null);
+  const [totalAnalyses, setTotalAnalyses] = useState<number | null>(null);
+  const [totalAnalysesThisMonth, setTotalAnalysesThisMonth] = useState<
+    number | null
+  >(null);
+  const [mostRecent, setMostRecent] = useState<{
+    id: string;
+    role: string | null;
+    created_at: string;
+    ats_score: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(({ data }) => {
+      const name =
+        data.user?.user_metadata?.full_name ??
+        data.user?.user_metadata?.name ??
+        data.user?.email ??
+        "there";
+      setUserName(name);
+    });
+
+    async function loadStats() {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        // Auth listener below retriggers loadStats() once ready.
+        return;
+      }
+
+      apiFetch("/dashboard/insight")
+        .then((res) => {
+          setAiInsight(res.insight);
+          setHasAnalyses(res.has_analyses);
+        })
+        .catch(() => {
+          setAiInsight("Insight unavailable right now.");
+          setHasAnalyses(true);
+        });
+
+      apiFetch("/dashboard/stats")
+        .then((res) => {
+          setTotalAnalyses(res.total_analyses);
+          setTotalAnalysesThisMonth(res.total_analyses_this_month);
+          setMostRecent(res.most_recent);
+        })
+        .catch(() => {
+          // leave existing values as-is on failure — don't show fake 0
+        });
+    }
+
+    loadStats();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) loadStats();
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const firstTimeGreetings = [
+    `Welcome, ${userName ?? "there"}. Let's get started.`,
+    `Great to have you, ${userName ?? "there"}. Let's map out your path forward.`,
+    `Hello, ${userName ?? "there"}. Ready to see where you stand?`,
+  ];
+
+  const nightGreetings = [
+    `Good to see you, ${userName}.`,
+    `Working late tonight, ${userName}?`,
+    `Welcome back, ${userName}, let's finish it well.`,
+  ];
+
+  const morningGreetings = [
+    `Good morning, ${userName}.`,
+    `Welcome back, ${userName}. Ready to start the day?`,
+    `Hello, ${userName}. Let's see what's next.`,
+  ];
+
+  const afternoonGreetings = [
+    `Good afternoon, ${userName}.`,
+    `Welcome back, ${userName}. Hope your day is going well.`,
+    `Hello, ${userName}. Let's continue where you left off.`,
+  ];
+
+  const eveningGreetings = [
+    `Good evening, ${userName}.`,
+    `Welcome back, ${userName}. Wrapping up for the day?`,
+    `Hello, ${userName}. Good to see you this evening.`,
+  ];
+
+  const [greetingSeed] = useState(() => Math.random());
+
+  function getGreeting() {
+    if (hasAnalyses === false) {
+      return firstTimeGreetings[
+        Math.floor(greetingSeed * firstTimeGreetings.length)
+      ];
+    }
+    if (!userName) return "Welcome back.";
+    const hour = new Date().getHours();
+    const pool =
+      hour < 6
+        ? nightGreetings
+        : hour < 12
+          ? morningGreetings
+          : hour < 18
+            ? afternoonGreetings
+            : eveningGreetings;
+    return pool[Math.floor(greetingSeed * pool.length)];
+  }
+
   return (
     <>
       {/* HERO SECTION (Quick Action & Insights) */}
@@ -38,7 +156,7 @@ export default function DashboardPage() {
         <div className="flex flex-col mt-1 gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-text">
-              Welcome back, {dashboardData.userName}.
+              {getGreeting()}
             </h1>
             <p className="mt-1 text-sm text-text-muted">
               Here is an overview of your career analysis and roadmap progress.
@@ -63,7 +181,7 @@ export default function DashboardPage() {
                 AI Analysis
               </p>
               <p className="mt-0.5 text-sm text-text">
-                {dashboardData.aiInsight}
+                {aiInsight ?? "Loading insight..."}
               </p>
             </div>
           </div>
@@ -84,17 +202,17 @@ export default function DashboardPage() {
                 Total Analyses
               </h3>
               <p className="mt-1.5 text-2xl font-bold text-text">
-                {dashboardData.totalAnalyses}
+                {totalAnalyses ?? "—"}
               </p>
               <p className="text-sm text-text-muted">
-                +{dashboardData.totalAnalysesThisMonth} this month
+                +{totalAnalysesThisMonth ?? 0} this month
               </p>
             </div>
           </Link>
 
           {/* Most Recent Analysis Card */}
           <Link
-            href={`/report/${dashboardData.mostRecentAnalysis.id}`}
+            href={mostRecent ? `/report/${mostRecent.id}` : "/analyze"}
             className="border border-border p-4 rounded-xl flex flex-col gap-2.5 hover:bg-gray-50 transition-colors group"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
@@ -105,17 +223,19 @@ export default function DashboardPage() {
                 Most Recent Analysis
               </h3>
               <p className="mt-1.5 font-bold text-lg text-text truncate">
-                {dashboardData.mostRecentAnalysis.role}
+                {mostRecent?.role ?? "No analyses yet"}
               </p>
               <p className="text-sm text-text-muted">
-                {dashboardData.mostRecentAnalysis.timeAgo}
+                {mostRecent
+                  ? timeAgo(mostRecent.created_at)
+                  : "Run your first one"}
               </p>
             </div>
           </Link>
 
           {/* Latest ATS Score Card */}
           <Link
-            href={`/report/${dashboardData.mostRecentAnalysis.id}/ats-score`}
+            href={mostRecent ? `/report/${mostRecent.id}` : "/analyze"}
             className="border border-border p-4 rounded-xl flex flex-col gap-2.5 hover:bg-gray-50 transition-colors group"
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
@@ -126,10 +246,12 @@ export default function DashboardPage() {
                 Latest ATS Score
               </h3>
               <p className="mt-1.5 font-bold text-lg text-text">
-                {dashboardData.latestAtsScore}/100
+                {mostRecent?.ats_score != null
+                  ? `${mostRecent.ats_score}/100`
+                  : "—"}
               </p>
               <p className="text-sm text-text-muted truncate">
-                {dashboardData.mostRecentAnalysis.role}
+                {mostRecent?.role ?? "—"}
               </p>
             </div>
           </Link>

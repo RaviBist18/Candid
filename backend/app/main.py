@@ -2,11 +2,12 @@
 Candid backend — FastAPI entrypoint.
 Phase 3: core routing wired. Auth added in Phase 4.
 """
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
-from .routers import sources, analyses, reports, chat
+from .routers import sources, analyses, reports, chat, dashboard
 
 app = FastAPI(title="Candid API", version="0.1.0")
 
@@ -23,6 +24,7 @@ app.include_router(sources.router)
 app.include_router(analyses.router)
 app.include_router(reports.router)
 app.include_router(chat.router)
+app.include_router(dashboard.router)
 
 
 @app.get("/health")

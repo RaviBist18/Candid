@@ -418,8 +418,10 @@ export default function ReportPage() {
     async function fetchReport() {
       try {
         const r = await apiFetch(`/reports/by-analysis/${analysisId}`);
-        const items = await apiFetch(`/reports/${r.id}/roadmap`);
-        const messages = await apiFetch(`/reports/${r.id}/chat`);
+        const [items, messages] = await Promise.all([
+          apiFetch(`/reports/${r.id}/roadmap`),
+          apiFetch(`/reports/${r.id}/chat`),
+        ]);
         if (!cancelled) {
           setReport(r);
           setRoadmap(items);
@@ -533,7 +535,7 @@ export default function ReportPage() {
   return (
     <div className="w-full flex flex-col gap-6">
       <Link
-        href="/analyses"
+        href="/dashboard"
         className="flex items-center gap-1.5 text-sm text-text-muted hover:text-primary transition-colors w-fit"
       >
         <ArrowLeft size={16} />
