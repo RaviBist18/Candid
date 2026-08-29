@@ -110,35 +110,28 @@ def get_dashboard_stats(user_id: str = Depends(get_current_user)):
         and datetime.fromisoformat(a["created_at"]).year == now.year
     )
 
-    Fmost_recent = None
+    most_recent = None
     if all_analyses.data:
         latest = max(all_analyses.data, key=lambda a: a["created_at"])
         analysis = (
             supabase.table("analyses")
-            .select("id, created_at, job_description")
+            .select("id, created_at, job_title")
             .eq("id", latest["id"])
             .single()
             .execute()
         )
 
-        try:
-            report = (
-                supabase.table("reports")
-                .select("ats_score")
-                .eq("analysis_id", latest["id"])
-                .single()
-                .execute()
-            )
-            ats_score = report.data.get("ats_score") if report.data else None
-        except Exception:
-            ats_score = None
-
-        jd = analysis.data.get("job_description") or ""
-        role_display = jd[:60] + ("..." if len(jd) > 60 else "")
+        report = (
+            supabase.table("reports")
+            .select("ats_score")
+            .eq("analysis_id", analysis.data["id"])
+            .execute()
+        )
+        ats_score = report.data[0]["ats_score"] if report.data else None
 
         most_recent = {
             "id": analysis.data["id"],
-            "role": role_display,
+            "role": analysis.data.get("job_title") or "Untitled",
             "created_at": analysis.data["created_at"],
             "ats_score": ats_score,
         }

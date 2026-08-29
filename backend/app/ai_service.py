@@ -7,7 +7,7 @@ import re
 
 from .db import supabase
 from .groq_client import call_groq_json, GroqCallError
-
+from .ats_scoring import compute_ats_score
 
 _STOPWORDS = {
     "the",
@@ -66,26 +66,6 @@ _STOPWORDS = {
 }
 
 
-def _compute_ats_score(resume_text: str, job_description: str) -> int:
-    """
-    Rough keyword-overlap ATS score — % of the JD's significant terms that
-    also appear in the resume text. Same core idea real ATS-checker tools
-    use (e.g. Jobscan): deterministic keyword matching, not an AI opinion.
-    """
-    if not resume_text or not job_description:
-        return 0
-
-    jd_words = re.findall(r"[a-zA-Z][a-zA-Z0-9+.#]{2,}", job_description.lower())
-    jd_keywords = {w for w in jd_words if w not in _STOPWORDS}
-    if not jd_keywords:
-        return 0
-
-    resume_lower = resume_text.lower()
-    matched = sum(1 for w in jd_keywords if w in resume_lower)
-
-    return round((matched / len(jd_keywords)) * 100)
-
-
 def _format_sources(sources: list[dict]) -> str:
     if not sources:
         return "No sources connected yet."
@@ -112,7 +92,7 @@ markdown, no extra text outside the JSON:
 
 {
   "missing_projects": [{"title": str, "tagline": str, "reasons": [str], "estimated_time": str}],
-  "skill_gaps": [{"skill": str, "why_it_matters": [str]}],
+    "skill_gaps": [{"skill": str, "severity": "critical"|"important"|"nice_to_have", "why_it_matters": [str], "related_project": str|null}],
   "ats_issues": [{"issue": str, "fix": [str]}],
     "roadmap_items": [{"project_title": str, "title": str, "description": str, "order_index": int}]
 }
@@ -130,7 +110,12 @@ a project whose prerequisites the candidate doesn't have yet. Each needs a \
 short, sharp tagline (one line, no fluff, no unexplained jargon), 2-4 specific \
 reasons grounded in the candidate's actual gap versus the JD, and a realistic \
 time estimate for someone at their level building it part-time.
-- skill_gaps: 3-5 skill gaps maximum, never more. If more than 5 individual \
+- skill_gaps: 3-5 skill gaps maximum, never more. Assign each a severity: \
+"critical" (blocking for this JD, must fix), "important" (expected, weakens \
+candidacy if missing), or "nice_to_have" (bonus, not disqualifying). If a gap \
+is directly addressed by one of the missing_projects above, set \
+related_project to that project's exact title string; otherwise null. If more \
+than 5 individual \
 gaps would apply, group closely related ones under one broader umbrella skill \
 instead of listing each tool separately — combine narrow, overlapping tools \
 into one category-level entry rather than naming every individual one. \
@@ -199,7 +184,8 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
     try:
         result = call_groq_json(messages)
 
-        ats_score = _compute_ats_score(resume_text, job_description)
+        ats_result = compute_ats_score(resume_text, job_description)
+        ats_score = ats_result["score"]
 
         report = (
             supabase.table("reports")
@@ -210,6 +196,7 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
                     "skill_gaps": result.get("skill_gaps", []),
                     "ats_issues": result.get("ats_issues", []),
                     "ats_score": ats_score,
+                    "ats_breakdown": ats_result,
                 }
             )
             .execute()
@@ -243,6 +230,70 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
         supabase.table("analyses").update(
             {"status": "failed", "error_message": f"Unexpected error: {e}"}
         ).eq("id", analysis_id).execute()
+
+
+ASSISTANT_SYSTEM_PROMPT = """You are a career mentor for job seekers — patient, \
+direct, and genuinely invested in helping someone actually get hired. You cover \
+resumes, ATS systems, portfolios, GitHub profiles, skill-building, project \
+selection, interview prep, salary basics, LinkedIn, cover letters, and how \
+hiring actually works.
+
+Default to plain conversational paragraphs — 2-5 sentences is enough for most \
+questions. Answer the actual question first, in the first sentence, before any \
+background explanation.
+
+Default to plain paragraphs, always. Only switch to bullet points if the \
+person's message explicitly asks for a list, steps, or bullet points (e.g. \
+they say "bullet points," "list them," "steps," "in short"). If they didn't \
+ask for that format, write prose even when the content could technically be \
+listed — do not decide on your own that something "counts as a list."
+
+Never bold any word or phrase, ever, even for emphasis on a key term. Never \
+use tables, headers (##), horizontal rules, or asterisks of any kind. This is \
+a chat message, not a document — plain sentences only, dashes for a list ONLY \
+when explicitly requested.
+
+Explain like a mentor: plain language, define jargon briefly the first time it \
+comes up, use a quick concrete example only if it genuinely speeds up \
+understanding. Assume the person is smart but new to the industry's unwritten \
+rules.
+
+Handle follow-ups and pushback naturally — if someone disagrees or asks "what \
+if X," engage with the actual counter-argument instead of repeating your first \
+answer.
+
+Never invent specific facts about companies or current market data you aren't \
+sure of — say so plainly and point them toward how to find it instead.
+
+Skip filler openers like "Great question." Get straight to the point, keep it \
+short, and only go longer when the question is genuinely complex enough to \
+need it."""
+
+
+def generate_assistant_reply(user_id: str) -> str:
+    history = (
+        supabase.table("assistant_messages")
+        .select("role, content")
+        .eq("user_id", user_id)
+        .order("created_at")
+        .execute()
+    )
+
+    messages = [{"role": "system", "content": ASSISTANT_SYSTEM_PROMPT}]
+    for m in history.data[-10:]:
+        messages.append({"role": m["role"], "content": m["content"]})
+
+    try:
+        from .groq_client import _client, MODEL
+
+        response = _client.chat.completions.create(
+            model=MODEL, messages=messages, temperature=0.6
+        )
+        content = response.choices[0].message.content
+        content = re.sub(r"\*\*(.*?)\*\*", r"\1", content)
+        return content
+    except Exception:
+        return "Sorry, I ran into an error generating a response. Try asking again."
 
 
 CHAT_SYSTEM_PROMPT = """You are the same senior career strategist who wrote the \
@@ -295,6 +346,8 @@ def generate_chat_reply(report_id: str) -> str:
         response = _client.chat.completions.create(
             model=MODEL, messages=messages, temperature=0.5
         )
-        return response.choices[0].message.content
+        content = response.choices[0].message.content
+        content = re.sub(r"\*\*(.*?)\*\*", r"\1", content)
+        return content
     except Exception:
         return "Sorry, I ran into an error generating a response. Try asking again."

@@ -27,6 +27,7 @@ class SourceOut(BaseModel):
 
 # ── Analyses ────────────────────────────────────────────
 class AnalysisCreate(BaseModel):
+    job_title: str = Field(..., min_length=1, max_length=200)
     job_description: str = Field(..., min_length=10)
     resume_text: str = Field(..., min_length=10)
     portfolio_url: Optional[str] = None
@@ -35,11 +36,14 @@ class AnalysisCreate(BaseModel):
 class AnalysisOut(BaseModel):
     id: str
     user_id: str
+    job_title: str
+    is_sample: bool = False
     job_description: str
     resume_text: str
     portfolio_url: Optional[str] = None
     status: Literal["pending", "processing", "completed", "failed"]
     error_message: Optional[str] = None
+    ats_score: Optional[int] = None
     created_at: datetime
 
 
@@ -86,3 +90,14 @@ class ChatMessageOut(BaseModel):
 class InsightOut(BaseModel):
     insight: str
     has_analyses: bool
+
+
+class AssistantMessageCreate(BaseModel):
+    content: str = Field(..., min_length=1)
+
+
+class AssistantMessageOut(BaseModel):
+    id: str
+    role: Literal["user", "assistant"]
+    content: str
+    created_at: datetime

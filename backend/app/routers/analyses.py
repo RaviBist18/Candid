@@ -21,7 +21,23 @@ def list_analyses(user_id: str = Depends(get_current_user)):
         .order("created_at", desc=True)
         .execute()
     )
-    return result.data
+    analyses = result.data
+    if not analyses:
+        return analyses
+
+    analysis_ids = [a["id"] for a in analyses]
+    reports = (
+        supabase.table("reports")
+        .select("analysis_id, ats_score")
+        .in_("analysis_id", analysis_ids)
+        .execute()
+    )
+    score_by_analysis = {r["analysis_id"]: r["ats_score"] for r in reports.data}
+
+    for a in analyses:
+        a["ats_score"] = score_by_analysis.get(a["id"])
+
+    return analyses
 
 
 @router.post("", response_model=AnalysisOut)
@@ -32,6 +48,7 @@ def create_analysis(
 ):
     payload = {
         "user_id": user_id,
+        "job_title": analysis.job_title,
         "job_description": analysis.job_description,
         "resume_text": analysis.resume_text,
         "portfolio_url": analysis.portfolio_url,
@@ -83,6 +100,42 @@ def get_roadmap_progress(user_id: str = Depends(get_current_user)):
             entry["done"] += 1
 
     return progress
+
+
+@router.get("/sample", response_model=AnalysisOut | None)
+def get_sample_analysis(user_id: str = Depends(get_current_user)):
+    result = (
+        supabase.table("analyses")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("is_sample", True)
+        .execute()
+    )
+    return result.data[0] if result.data else None
+
+
+@router.patch("/{analysis_id}/sample")
+def set_sample_analysis(analysis_id: str, user_id: str = Depends(get_current_user)):
+    existing = (
+        supabase.table("analyses")
+        .select("id")
+        .eq("id", analysis_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    # unset any previous sample for this user, then set the new one
+    supabase.table("analyses").update({"is_sample": False}).eq("user_id", user_id).eq(
+        "is_sample", True
+    ).execute()
+
+    supabase.table("analyses").update({"is_sample": True}).eq(
+        "id", analysis_id
+    ).execute()
+
+    return {"is_sample": True, "id": analysis_id}
 
 
 @router.get("/{analysis_id}", response_model=AnalysisOut)

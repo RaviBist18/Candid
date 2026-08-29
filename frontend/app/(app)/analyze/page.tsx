@@ -148,10 +148,12 @@ export default function AnalyzePage() {
   const [portfolioUrl, setPortfolioUrl] = useState("");
 
   // Step 2 state
+  const [jobTitle, setJobTitle] = useState("");
   const [jobDescription, setJobDescription] = useState("");
 
   const canGoNextFromStep1 = resumeText.trim().length > 0;
-  const canGoNextFromStep2 = jobDescription.trim().length > 0;
+  const canGoNextFromStep2 =
+    jobDescription.trim().length > 0 && jobTitle.trim().length > 0;
 
   async function handleSubmit() {
     setSubmitting(true);
@@ -160,6 +162,7 @@ export default function AnalyzePage() {
       const res = await apiFetch("/analyses", {
         method: "POST",
         body: JSON.stringify({
+          job_title: jobTitle,
           job_description: jobDescription,
           resume_text: resumeText,
           portfolio_url: portfolioUrl || null,
@@ -321,6 +324,18 @@ export default function AnalyzePage() {
             </span>
           </div>
 
+          <div className="mb-4">
+            <label className="text-xs font-medium text-text-muted mb-1.5 block">
+              Job Title
+            </label>
+            <input
+              value={jobTitle}
+              onChange={(e) => setJobTitle(e.target.value)}
+              placeholder="e.g. Backend Developer"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+
           <textarea
             value={jobDescription}
             onChange={(e) => setJobDescription(e.target.value)}
@@ -407,6 +422,14 @@ export default function AnalyzePage() {
                 </span>
                 <span className="text-sm text-text font-medium">
                   {jobDescription.trim().length.toLocaleString()} characters
+                </span>
+              </div>
+              <div className="px-5 py-3.5 flex items-center justify-between">
+                <span className="flex items-center gap-2 text-sm text-primary font-medium">
+                  <Target size={14} /> Job Title
+                </span>
+                <span className="text-sm text-text font-medium">
+                  {jobTitle}
                 </span>
               </div>
             </div>
