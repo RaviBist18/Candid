@@ -1,10 +1,51 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { apiFetchServer } from "@/lib/api-server";
+import { createClient } from "@/lib/supabase-server";
 import SkillGapsListClient from "./SkillGapsListClient";
 
 export default async function SkillGapsListPage() {
-  const items = (await apiFetchServer("/skill-gaps")) ?? [];
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: analyses } = await supabase
+    .from("analyses")
+    .select("id, job_title")
+    .eq("user_id", user!.id)
+    .eq("status", "completed");
+
+  let items: any[] = [];
+
+  if (analyses && analyses.length > 0) {
+    const analysisIds = analyses.map((a) => a.id);
+    const titleByAnalysis = new Map(analyses.map((a) => [a.id, a.job_title]));
+
+    const { data: reports } = await supabase
+      .from("reports")
+      .select("analysis_id, skill_gaps, created_at")
+      .in("analysis_id", analysisIds);
+
+    items = (reports ?? [])
+      .filter((r) => (r.skill_gaps ?? []).length > 0)
+      .map((r) => {
+        const gaps = r.skill_gaps ?? [];
+        const criticalCount = gaps.filter(
+          (g: any) => g.severity === "critical",
+        ).length;
+        return {
+          id: r.analysis_id,
+          job_title: titleByAnalysis.get(r.analysis_id) ?? "Untitled",
+          critical_count: criticalCount,
+          total_count: gaps.length,
+          updated_at: r.created_at,
+        };
+      })
+      .sort(
+        (a, b) =>
+          new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+      );
+  }
 
   return (
     <div className="w-full flex flex-col gap-6">

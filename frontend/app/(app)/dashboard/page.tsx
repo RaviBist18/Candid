@@ -14,20 +14,55 @@ export default async function DashboardPage() {
     user?.email ??
     "there";
 
-  const [insightRes, statsRes, sampleRes] = await Promise.all([
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+
+  const [insightRes, allAnalyses, sampleRow] = await Promise.all([
     apiFetchServer("/dashboard/insight"),
-    apiFetchServer("/dashboard/stats"),
-    apiFetchServer("/analyses/sample"),
+    supabase
+      .from("analyses")
+      .select("id, job_title, created_at")
+      .eq("user_id", user!.id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("analyses")
+      .select("id")
+      .eq("user_id", user!.id)
+      .eq("is_sample", true)
+      .maybeSingle(),
   ]);
+
+  const analysesRows = allAnalyses.data ?? [];
+  const mostRecentRow = analysesRows[0] ?? null;
+
+  let mostRecentAtsScore: number | null = null;
+  if (mostRecentRow) {
+    const { data: reportRow } = await supabase
+      .from("reports")
+      .select("ats_score")
+      .eq("analysis_id", mostRecentRow.id)
+      .maybeSingle();
+    mostRecentAtsScore = reportRow?.ats_score ?? null;
+  }
 
   const data = {
     userName,
     aiInsight: insightRes?.insight ?? "Insight unavailable right now.",
     hasAnalyses: insightRes?.has_analyses ?? true,
-    totalAnalyses: statsRes?.total_analyses ?? 0,
-    totalAnalysesThisMonth: statsRes?.total_analyses_this_month ?? 0,
-    mostRecent: statsRes?.most_recent ?? null,
-    sampleAnalysisId: sampleRes?.id ?? null,
+    totalAnalyses: analysesRows.length,
+    totalAnalysesThisMonth: analysesRows.filter(
+      (a) => new Date(a.created_at) >= startOfMonth,
+    ).length,
+    mostRecent: mostRecentRow
+      ? {
+          id: mostRecentRow.id,
+          role: mostRecentRow.job_title,
+          created_at: mostRecentRow.created_at,
+          ats_score: mostRecentAtsScore,
+        }
+      : null,
+    sampleAnalysisId: sampleRow.data?.id ?? null,
   };
 
   return <DashboardClient data={data} />;
