@@ -24,7 +24,7 @@ const faqs = [
 
 export default function HelpPage() {
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10 flex flex-col gap-6">
+    <div className="w-full max-w-3xl mx-auto flex flex-col gap-6">
       <Link
         href="/settings"
         className="flex items-center gap-1.5 text-sm text-text-muted hover:text-primary transition-colors w-fit"
@@ -72,12 +72,14 @@ export default function HelpPage() {
         </div>
 
         <a
-          href="mailto:support@candid.app"
+          href="https://mail.google.com/mail/?view=cm&fs=1&to=ravist58@gmail.com"
+          target="_blank"
+          rel="noopener noreferrer"
           className="text-sm font-semibold text-primary hover:underline"
         >
           Email support
         </a>
       </section>
-    </main>
+    </div>
   );
 }

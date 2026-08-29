@@ -22,7 +22,7 @@ export default function Footer() {
             className="hover:text-primary hover:underline transition-colors"
             href="/help"
           >
-            Support
+            Help
           </a>
         </div>
       </div>

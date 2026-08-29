@@ -17,6 +17,8 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import DeleteAccountModal from "@/components/DeleteAccountModal";
+import { createClient } from "@/lib/supabase-browser";
 
 export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("Ravi@58");
@@ -26,11 +28,20 @@ export default function SettingsPage() {
   const [linkedinDragActive, setLinkedinDragActive] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [userEmail, setUserEmail] = useState("");
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => {
+      if (data.user?.email) setUserEmail(data.user.email);
+    });
+  }, []);
 
   useEffect(() => setMounted(true), []);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-10 flex flex-col gap-6">
+    <div className="w-full flex flex-col gap-6">
       <Link
         href="/dashboard"
         className="flex items-center gap-1.5 text-sm text-text-muted hover:text-primary transition-colors w-fit"
@@ -41,7 +52,7 @@ export default function SettingsPage() {
       <div>
         <h1 className="text-2xl font-bold text-text">Settings</h1>
         <p className="text-sm text-text-muted mt-1">
-          Signed in as <span className="text-text">ravibist178@gmail.com</span>
+          Signed in as <span className="text-text">{userEmail}</span>
         </p>
       </div>
 
@@ -255,14 +266,25 @@ export default function SettingsPage() {
             Danger Zone
           </span>
         </div>
-        <div className="px-5 py-4 flex items-center justify-between opacity-50">
+        <button
+          type="button"
+          onClick={() => setShowDeleteModal(true)}
+          className="w-full px-5 py-4 flex items-center justify-between hover:bg-red-50 transition-colors"
+        >
           <div className="flex items-center gap-3">
             <Trash2 size={16} className="text-red-500" />
             <span className="text-sm text-red-600">Delete Account</span>
           </div>
-          <span className="text-xs text-text-muted">Phase 4</span>
-        </div>
+          <ChevronRight size={16} className="text-red-400" />
+        </button>
       </section>
-    </main>
+
+      {showDeleteModal && userEmail && (
+        <DeleteAccountModal
+          userEmail={userEmail}
+          onClose={() => setShowDeleteModal(false)}
+        />
+      )}
+    </div>
   );
 }

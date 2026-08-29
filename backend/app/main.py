@@ -7,7 +7,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import os
 
-from .routers import sources, analyses, reports, chat, dashboard, skill_gaps, assistant
+from .routers import (
+    sources,
+    analyses,
+    reports,
+    chat,
+    dashboard,
+    skill_gaps,
+    assistant,
+    account,
+)
 
 app = FastAPI(title="Candid API", version="0.1.0")
 
@@ -27,6 +36,7 @@ app.include_router(chat.router)
 app.include_router(dashboard.router)
 app.include_router(skill_gaps.router)
 app.include_router(assistant.router)
+app.include_router(account.router)
 
 
 @app.get("/health")
