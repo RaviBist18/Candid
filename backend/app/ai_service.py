@@ -8,6 +8,7 @@ import re
 from .db import supabase
 from .groq_client import call_groq_json, GroqCallError
 from .ats_scoring import compute_ats_score
+from .rag_service import retrieve, RetrievalError
 
 _STOPWORDS = {
     "the",
@@ -148,7 +149,12 @@ and their time — clear, credible, and worth acting on. No corporate jargon, no
 motivational filler, no hedging.Write for someone motivated but not yet senior — clear enough that a mid-level \
 or junior engineer can read every project, skill gap, and roadmap step and \
 immediately understand both what it means and why it matters, with no \
-unexplained acronyms or infrastructure jargon left undefined."""
+unexplained acronyms or infrastructure jargon left undefined.
+
+If real job postings or ATS parsing rules are provided in the user message, \
+ground your skill_gaps and ats_issues findings in them specifically — cite \
+what the data shows rather than relying only on general knowledge. If no such \
+data is provided, proceed using your own expertise as normal."""
 
 
 def run_gap_analysis(analysis_id: str, user_id: str) -> None:
@@ -172,12 +178,33 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
     if portfolio_url:
         profile_parts += f"\n\n--- PORTFOLIO URL (this analysis) ---\n{portfolio_url}"
 
+    grounding_context = ""
+    try:
+        job_chunks = retrieve(job_description, "job_posting", top_k=5)
+        ats_chunks = retrieve(resume_text or job_description, "ats_rule", top_k=5)
+
+        if job_chunks:
+            grounding_context += (
+                "\n\n--- SIMILAR REAL JOB POSTINGS (for skill-gap grounding) ---\n"
+            )
+            grounding_context += "\n\n".join(job_chunks)
+
+        if ats_chunks:
+            grounding_context += (
+                "\n\n--- ATS PARSING RULES (for ats_issues grounding) ---\n"
+            )
+            grounding_context += "\n\n".join(ats_chunks)
+
+    except RetrievalError as e:
+        print(f"RAG retrieval failed, proceeding ungrounded: {e}")
+        grounding_context = ""
     messages = [
         {"role": "system", "content": GAP_ANALYSIS_SYSTEM_PROMPT},
         {
             "role": "user",
             "content": f"CANDIDATE PROFILE:\n{profile_parts}\n\n"
-            f"TARGET JOB DESCRIPTION:\n{job_description}",
+            f"TARGET JOB DESCRIPTION:\n{job_description}"
+            f"{grounding_context}",
         },
     ]
 

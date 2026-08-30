@@ -87,6 +87,7 @@ export default function AnalyzePage() {
   const [analysisStatus, setAnalysisStatus] = useState<string>("pending");
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
     apiFetch("/sources")
@@ -142,6 +143,17 @@ export default function AnalyzePage() {
       cancelled = true;
     };
   }, [phase, analysisId, router]);
+
+  useEffect(() => {
+    if (phase !== "processing") {
+      setElapsedSeconds(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setElapsedSeconds((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   // Step 1 state — resume + portfolio, entered fresh per analysis (not saved to sources)
   const [resumeText, setResumeText] = useState("");
@@ -466,6 +478,9 @@ export default function AnalyzePage() {
             </p>
             <p className="text-xs text-text-muted mt-1.5">
               This usually takes under a minute. Stay on this page.
+            </p>
+            <p className="text-[11px] text-text-muted/70 mt-3 font-mono tabular-nums">
+              {elapsedSeconds}s elapsed
             </p>
           </div>
         </div>
