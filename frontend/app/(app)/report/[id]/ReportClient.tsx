@@ -515,7 +515,7 @@ export default function ReportClient({
   return (
     <div className="w-full flex flex-col gap-6">
       <Link
-        href="/dashboard"
+        href="/analyses"
         className="flex items-center gap-1.5 text-sm text-text-muted hover:text-primary transition-colors w-fit"
       >
         <ArrowLeft size={16} />

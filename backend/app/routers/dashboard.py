@@ -4,6 +4,7 @@ No new AI calls here by design (cheap/rule-based insight, see project notes).
 """
 
 import random
+import time
 from collections import Counter
 
 from fastapi import APIRouter, Depends
@@ -18,6 +19,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/insight", response_model=InsightOut)
 def get_dashboard_insight(user_id: str = Depends(get_current_user)):
+    t0 = time.time()
     analyses = (
         supabase.table("analyses")
         .select("id")
@@ -27,6 +29,7 @@ def get_dashboard_insight(user_id: str = Depends(get_current_user)):
         .limit(3)
         .execute()
     )
+    print(f"[TIMING] analyses query: {time.time() - t0:.2f}s")
     analysis_ids = [a["id"] for a in analyses.data]
 
     if not analysis_ids:
@@ -35,13 +38,14 @@ def get_dashboard_insight(user_id: str = Depends(get_current_user)):
             "has_analyses": False,
         }
 
+    t1 = time.time()
     reports = (
         supabase.table("reports")
         .select("skill_gaps, missing_projects, ats_issues")
         .in_("analysis_id", analysis_ids)
         .execute()
     )
-
+    print(f"[TIMING] reports query: {time.time() - t1:.2f}s")
     candidates = []
 
     # Signal 1: recurring skill gap
@@ -88,6 +92,7 @@ def get_dashboard_insight(user_id: str = Depends(get_current_user)):
             "has_analyses": True,
         }
 
+    print(f"[TIMING] insight endpoint TOTAL: {time.time() - t0:.2f}s")
     return {"insight": random.choice(candidates), "has_analyses": True}
 
 

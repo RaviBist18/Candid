@@ -1,27 +1,49 @@
 """
 Supabase client — service_role/sb_secret key, bypasses RLS.
 
-`get_supabase()` returns a fresh client per call. `supabase` is a thin
-proxy that creates a new client on every attribute access (e.g. every
-`.table(...)` call) — this avoids the old singleton going stale after
-being idle, which was causing intermittent
-`httpx.RemoteProtocolError: Server disconnected` errors under
-uvicorn's threadpool.
+True singleton, created once at process startup. If a call fails due to
+a stale/dropped connection (the original RemoteProtocolError issue), the
+proxy catches it, recreates the client once, and retries — so we get
+one-time client-creation cost instead of paying it on every request,
+while still self-healing from idle disconnects.
 """
 
 from supabase import create_client, Client
+from httpx import RemoteProtocolError
 from .config import settings
 
+_client: Client | None = None
 
-def get_supabase() -> Client:
+
+def _new_client() -> Client:
     return create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
 
 
+def get_supabase() -> Client:
+    global _client
+    if _client is None:
+        _client = _new_client()
+    return _client
+
+
 class _SupabaseProxy:
-    """Delegates every attribute access to a freshly created client."""
+    """Delegates to the singleton client. On RemoteProtocolError (stale
+    connection), recreates the client once and retries the same call."""
 
     def __getattr__(self, name):
-        return getattr(get_supabase(), name)
+        attr = getattr(get_supabase(), name)
+        if not callable(attr):
+            return attr
+
+        def wrapper(*args, **kwargs):
+            global _client
+            try:
+                return attr(*args, **kwargs)
+            except RemoteProtocolError:
+                _client = _new_client()
+                return getattr(_client, name)(*args, **kwargs)
+
+        return wrapper
 
 
 supabase = _SupabaseProxy()

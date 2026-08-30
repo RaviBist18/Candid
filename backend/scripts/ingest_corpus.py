@@ -101,12 +101,12 @@ def ingest_job_postings(csv_path: str, text_column: str, limit: int = 500):
 
 
 if __name__ == "__main__":
-    print("Ingesting ATS rules...")
-    ingest_ats_rules()
+    # print("Ingesting ATS rules...")
+    # ingest_ats_rules()
 
-    # print("Ingesting job postings...")
-    # ingest_job_postings(
-    #     csv_path="data/job_postings.csv", text_column="description", limit=500
-    # )
+    print("Ingesting job postings...")
+    ingest_job_postings(
+        csv_path="data/job_postings.csv", text_column="description", limit=500
+    )
 
     print("Done.")

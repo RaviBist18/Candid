@@ -210,6 +210,10 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
 
     try:
         result = call_groq_json(messages)
+        print(
+            f"[DEBUG] missing_projects: {len(result.get('missing_projects', []))}, "
+            f"roadmap_items: {len(result.get('roadmap_items', []))}"
+        )
 
         ats_result = compute_ats_score(resume_text, job_description)
         ats_score = ats_result["score"]
