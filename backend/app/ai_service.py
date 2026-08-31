@@ -76,6 +76,53 @@ def _format_sources(sources: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def _ensure_roadmap_coverage(result: dict, messages: list[dict]) -> dict:
+    """If any missing_project has zero roadmap_items, retry Groq once with a
+    correction note. If still incomplete after retry, log and proceed —
+    never block the whole analysis on this."""
+    project_titles = {p["title"] for p in result.get("missing_projects", [])}
+    covered_titles = {
+        item.get("project_title") for item in result.get("roadmap_items", [])
+    }
+    missing_coverage = project_titles - covered_titles
+
+    if not missing_coverage:
+        return result
+
+    print(
+        f"[WARN] roadmap_items missing coverage for: {missing_coverage} — retrying once"
+    )
+
+    correction_note = {
+        "role": "user",
+        "content": (
+            "Your previous response left these missing_projects with zero "
+            f"roadmap_items: {list(missing_coverage)}. Every missing_project "
+            "must have at least 2-3 roadmap_items whose project_title matches "
+            "exactly. Return the full corrected JSON object again, same shape "
+            "as before, no preamble."
+        ),
+    }
+    retry_messages = messages + [correction_note]
+
+    try:
+        retry_result = call_groq_json(retry_messages)
+        retry_titles = {
+            item.get("project_title") for item in retry_result.get("roadmap_items", [])
+        }
+        still_missing = project_titles - retry_titles
+        if still_missing:
+            print(
+                f"[WARN] retry still missing coverage for: {still_missing} — proceeding anyway"
+            )
+        else:
+            print("[INFO] retry fixed roadmap coverage")
+        return retry_result
+    except GroqCallError as e:
+        print(f"[WARN] retry call failed ({e}) — proceeding with original result")
+        return result
+
+
 GAP_ANALYSIS_SYSTEM_PROMPT = """You are a senior technical recruiter and career \
 strategist with deep hiring experience at top engineering organizations. You are \
 reviewing a candidate's full profile against a specific target job description, \
@@ -210,10 +257,13 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
 
     try:
         result = call_groq_json(messages)
+        print(f"[DEBUG] raw roadmap_items from Groq: {result.get('roadmap_items')}")
         print(
             f"[DEBUG] missing_projects: {len(result.get('missing_projects', []))}, "
             f"roadmap_items: {len(result.get('roadmap_items', []))}"
         )
+
+        result = _ensure_roadmap_coverage(result, messages)
 
         ats_result = compute_ats_score(resume_text, job_description)
         ats_score = ats_result["score"]
