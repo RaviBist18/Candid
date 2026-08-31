@@ -14,6 +14,7 @@ import {
   Target,
   Loader2,
   ShieldCheck,
+  Upload,
 } from "lucide-react";
 
 type SourceStatus = { connected: boolean; username?: string };
@@ -158,6 +159,48 @@ export default function AnalyzePage() {
   // Step 1 state — resume + portfolio, entered fresh per analysis (not saved to sources)
   const [resumeText, setResumeText] = useState("");
   const [portfolioUrl, setPortfolioUrl] = useState("");
+  const [resumeMode, setResumeMode] = useState<"paste" | "upload">("paste");
+  const [dragActive, setDragActive] = useState(false);
+  const [uploadingResume, setUploadingResume] = useState(false);
+  const [uploadedFileName, setUploadedFileName] = useState("");
+  const [uploadError, setUploadError] = useState("");
+
+  async function uploadResumeFile(file: File) {
+    setUploadError("");
+    const ext = file.name.toLowerCase();
+    if (!ext.endsWith(".pdf") && !ext.endsWith(".docx")) {
+      setUploadError("Only PDF or DOCX files are supported.");
+      return;
+    }
+    setUploadingResume(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await apiFetch("/resume/extract", {
+        method: "POST",
+        body: formData,
+        headers: {},
+      });
+      setResumeText(res.text);
+      setUploadedFileName(res.filename || file.name);
+    } catch (e: any) {
+      setUploadError(e.message || "Failed to extract text from file.");
+    } finally {
+      setUploadingResume(false);
+    }
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) uploadResumeFile(file);
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragActive(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) uploadResumeFile(file);
+  }
 
   // Step 2 state
   const [jobTitle, setJobTitle] = useState("");
@@ -278,19 +321,112 @@ export default function AnalyzePage() {
               <div>
                 <p className="text-sm font-medium text-text">Resume</p>
                 <p className="text-xs text-text-muted">
-                  Paste the version you&apos;re using for this specific
-                  application.
+                  Paste text or upload a PDF/DOCX for this application.
                 </p>
               </div>
             </div>
 
-            <textarea
-              value={resumeText}
-              onChange={(e) => setResumeText(e.target.value)}
-              placeholder="Paste your resume text here..."
-              rows={8}
-              className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
-            />
+            <div className="flex gap-1 mb-3 bg-bg rounded-lg p-1 w-fit border border-border">
+              <button
+                type="button"
+                onClick={() => setResumeMode("paste")}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-md transition-colors ${
+                  resumeMode === "paste"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                <FileText size={13} />
+                Paste text
+              </button>
+              <button
+                type="button"
+                onClick={() => setResumeMode("upload")}
+                className={`flex items-center gap-1.5 text-xs font-semibold px-3.5 py-1.5 rounded-md transition-colors ${
+                  resumeMode === "upload"
+                    ? "bg-primary text-white shadow-sm"
+                    : "text-text-muted hover:text-text"
+                }`}
+              >
+                <Upload size={13} />
+                Upload file
+              </button>
+            </div>
+
+            {resumeMode === "paste" && (
+              <textarea
+                value={resumeText}
+                onChange={(e) => setResumeText(e.target.value)}
+                placeholder="Paste your resume text here..."
+                rows={8}
+                className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
+              />
+            )}
+
+            {resumeMode === "upload" && (
+              <label
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragActive(true);
+                }}
+                onDragLeave={() => setDragActive(false)}
+                onDrop={handleDrop}
+                className={`block border-2 border-dashed rounded-lg px-4 py-8 text-center transition-colors cursor-pointer ${
+                  dragActive
+                    ? "border-primary bg-primary/5"
+                    : "border-border bg-bg hover:border-primary/50"
+                }`}
+              >
+                <input
+                  type="file"
+                  accept=".pdf,.docx"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                {uploadingResume ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 size={20} className="animate-spin text-primary" />
+                    <p className="text-xs text-text-muted">
+                      Extracting text...
+                    </p>
+                  </div>
+                ) : resumeText && uploadedFileName ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Check size={20} className="text-primary" />
+                    <p className="text-sm font-medium text-text">
+                      {uploadedFileName}
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      {resumeText.length.toLocaleString()} characters extracted
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResumeText("");
+                        setUploadedFileName("");
+                      }}
+                      className="text-xs text-primary hover:underline font-medium mt-1"
+                    >
+                      Remove & upload different file
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload size={22} className="text-text-muted" />
+                    <p className="text-sm text-text">
+                      Drag & drop your resume, or{" "}
+                      <span className="text-primary font-medium">browse</span>
+                    </p>
+                    <p className="text-xs text-text-muted">
+                      PDF or DOCX, up to 10MB
+                    </p>
+                  </div>
+                )}
+                {uploadError && (
+                  <p className="text-xs text-danger mt-2">{uploadError}</p>
+                )}
+              </label>
+            )}
           </div>
 
           {/* Portfolio — fresh per analysis, not saved */}

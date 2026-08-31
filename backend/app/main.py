@@ -17,6 +17,7 @@ from .routers import (
     assistant,
     account,
 )
+from .resume_extract import router as resume_router
 
 app = FastAPI(title="Candid API", version="0.1.0")
 
@@ -37,6 +38,7 @@ app.include_router(dashboard.router)
 app.include_router(skill_gaps.router)
 app.include_router(assistant.router)
 app.include_router(account.router)
+app.include_router(resume_router)
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])

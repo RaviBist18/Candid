@@ -17,12 +17,14 @@ export async function apiFetch(path: string, options: RequestInit = {}) {
     throw new Error("Not authenticated");
   }
 
+  const isFormData = options.body instanceof FormData;
+
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
     headers: {
       ...options.headers,
       Authorization: `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
     },
   });
 

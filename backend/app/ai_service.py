@@ -77,6 +77,47 @@ def _format_sources(sources: list[dict]) -> str:
 
 
 def _ensure_roadmap_coverage(result: dict, messages: list[dict]) -> dict:
+    """If any missing_project has zero nested roadmap_items, retry Groq once
+    with a correction note. If still incomplete after retry, log and
+    proceed — never block the whole analysis on this."""
+    projects = result.get("missing_projects", [])
+    missing_coverage = [p["title"] for p in projects if not p.get("roadmap_items")]
+
+    if not missing_coverage:
+        return result
+
+    print(
+        f"[WARN] roadmap_items missing coverage for: {missing_coverage} — retrying once"
+    )
+
+    correction_note = {
+        "role": "user",
+        "content": (
+            "Your previous response left these missing_projects with zero "
+            f"roadmap_items: {missing_coverage}. Every missing_project must "
+            "have at least 2-3 roadmap_items nested inside it. Return the "
+            "full corrected JSON object again, same shape as before, no "
+            "preamble."
+        ),
+    }
+    retry_messages = messages + [correction_note]
+
+    try:
+        retry_result = call_groq_json(retry_messages)
+        retry_projects = retry_result.get("missing_projects", [])
+        still_missing = [
+            p["title"] for p in retry_projects if not p.get("roadmap_items")
+        ]
+        if still_missing:
+            print(
+                f"[WARN] retry still missing coverage for: {still_missing} — proceeding anyway"
+            )
+        else:
+            print("[INFO] retry fixed roadmap coverage")
+        return retry_result
+    except GroqCallError as e:
+        print(f"[WARN] retry call failed ({e}) — proceeding with original result")
+        return result
     """If any missing_project has zero roadmap_items, retry Groq once with a
     correction note. If still incomplete after retry, log and proceed —
     never block the whole analysis on this."""
@@ -139,10 +180,9 @@ Respond ONLY with a JSON object matching this exact shape — no preamble, no \
 markdown, no extra text outside the JSON:
 
 {
-  "missing_projects": [{"title": str, "tagline": str, "reasons": [str], "estimated_time": str}],
+  "missing_projects": [{"title": str, "tagline": str, "reasons": [str], "estimated_time": str, "roadmap_items": [{"title": str, "description": str, "order_index": int}]}],
     "skill_gaps": [{"skill": str, "severity": "critical"|"important"|"nice_to_have", "why_it_matters": [str], "related_project": str|null}],
-  "ats_issues": [{"issue": str, "fix": [str]}],
-    "roadmap_items": [{"project_title": str, "title": str, "description": str, "order_index": int}]
+  "ats_issues": [{"issue": str, "fix": [str]}]
 }
 
 Guidelines for each field:
@@ -178,12 +218,10 @@ expert vocabulary.
 in the material given. Each fix is 2-3 short, actionable bullet points a \
 candidate could apply immediately. If nothing meaningful is wrong, return an \
 empty list rather than inventing filler issues.
-- roadmap_items: an ordered, realistic weekly learning plan that directly \
-addresses the gaps above, sequenced sensibly (foundational skills before \
-advanced ones, one project's prerequisites before that project). Each item's \
-project_title must exactly match one of the titles used in missing_projects \
-above — every roadmap item belongs to a specific project, none are standalone. \
-Give each missing_project at least 2-3 roadmap_items. Each item's title should \
+- roadmap_items (nested inside each missing_project): an ordered, realistic \
+weekly learning plan for that specific project, sequenced sensibly \
+(foundational steps before advanced ones). Give each missing_project at \
+least 2-3 roadmap_items — never zero. Each item's title should \
 be a short, concrete, actionable step (start with a verb — "Set up," "Write," \
 "Deploy," "Test") that the candidate could check off in a single sitting or a \
 few days, not a vague milestone like "Learn Kubernetes." Each description \
@@ -257,10 +295,10 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
 
     try:
         result = call_groq_json(messages)
-        print(f"[DEBUG] raw roadmap_items from Groq: {result.get('roadmap_items')}")
         print(
             f"[DEBUG] missing_projects: {len(result.get('missing_projects', []))}, "
-            f"roadmap_items: {len(result.get('roadmap_items', []))}"
+            f"roadmap_items per project: "
+            f"{[len(p.get('roadmap_items', [])) for p in result.get('missing_projects', [])]}"
         )
 
         result = _ensure_roadmap_coverage(result, messages)
@@ -268,12 +306,14 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
         ats_result = compute_ats_score(resume_text, job_description)
         ats_score = ats_result["score"]
 
+        missing_projects = result.get("missing_projects", [])
+
         report = (
             supabase.table("reports")
             .insert(
                 {
                     "analysis_id": analysis_id,
-                    "missing_projects": result.get("missing_projects", []),
+                    "missing_projects": missing_projects,
                     "skill_gaps": result.get("skill_gaps", []),
                     "ats_issues": result.get("ats_issues", []),
                     "ats_score": ats_score,
@@ -284,19 +324,21 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
         )
         report_id = report.data[0]["id"]
 
-        roadmap_items = result.get("roadmap_items", [])
-        if roadmap_items:
-            rows = [
-                {
-                    "report_id": report_id,
-                    "project_title": item.get("project_title", ""),
-                    "title": item.get("title", ""),
-                    "description": item.get("description"),
-                    "is_checked": False,
-                    "order_index": item.get("order_index", i),
-                }
-                for i, item in enumerate(roadmap_items)
-            ]
+        rows = []
+        for project in missing_projects:
+            project_title = project.get("title", "")
+            for item in project.get("roadmap_items", []):
+                rows.append(
+                    {
+                        "report_id": report_id,
+                        "project_title": project_title,
+                        "title": item.get("title", ""),
+                        "description": item.get("description"),
+                        "is_checked": False,
+                        "order_index": item.get("order_index", 0),
+                    }
+                )
+        if rows:
             supabase.table("roadmap_items").insert(rows).execute()
 
         supabase.table("analyses").update({"status": "completed"}).eq(
