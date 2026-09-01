@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { createClient } from "@/lib/supabase-browser";
+
 import {
   ArrowLeft,
   ArrowRight,
@@ -108,28 +110,59 @@ export default function AnalyzePage() {
     if (phase !== "processing" || !analysisId) return;
     let cancelled = false;
 
-    async function poll() {
+    let streamController: AbortController | null = null;
+
+    async function stream() {
       try {
-        const analysis = await apiFetch(`/analyses/${analysisId}`);
-        if (cancelled) return;
+        const supabase = createClient();
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
 
-        if (analysis.status === "failed") {
-          setSubmitError(
-            analysis.error_message || "Analysis failed. Try again.",
-          );
-          setPhase("form");
-          setSubmitting(false);
-          return;
+        const controller = new AbortController();
+        streamController = controller;
+
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL}/analyses/${analysisId}/stream`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+          },
+        );
+
+        if (!res.ok || !res.body) {
+          throw new Error("Failed to start analysis stream.");
         }
 
-        setAnalysisStatus(analysis.status);
+        setAnalysisStatus("processing");
 
-        if (analysis.status === "completed") {
-          router.push(`/report/${analysisId}`);
-          return;
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || cancelled) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const payload = JSON.parse(line.slice(6));
+
+            if (payload.error) {
+              throw new Error(payload.error);
+            }
+            if (payload.chunk) {
+              setStreamedText((prev) => prev + payload.chunk);
+            }
+            if (payload.done) {
+              router.push(`/report/${analysisId}`);
+              return;
+            }
+          }
         }
-
-        setTimeout(poll, 2000);
       } catch (e: any) {
         if (!cancelled) {
           setSubmitError(e.message || "Something went wrong. Try again.");
@@ -139,15 +172,17 @@ export default function AnalyzePage() {
       }
     }
 
-    poll();
+    stream();
     return () => {
       cancelled = true;
+      streamController?.abort();
     };
   }, [phase, analysisId, router]);
 
   useEffect(() => {
     if (phase !== "processing") {
       setElapsedSeconds(0);
+      setLoadingMsgIndex(0);
       return;
     }
     const interval = setInterval(() => {
@@ -155,6 +190,27 @@ export default function AnalyzePage() {
     }, 1000);
     return () => clearInterval(interval);
   }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "processing") return;
+    const msgInterval = setInterval(() => {
+      setLoadingMsgIndex((i) => (i + 1) % LOADING_MESSAGES.length);
+    }, 3000);
+    return () => clearInterval(msgInterval);
+  }, [phase]);
+
+  const [streamedText, setStreamedText] = useState("");
+
+  const LOADING_MESSAGES = [
+    "Reading your GitHub activity...",
+    "Parsing your resume and portfolio...",
+    "Comparing your profile against the job description...",
+    "Identifying missing projects...",
+    "Finding skill gaps...",
+    "Checking for ATS issues...",
+    "Finalizing your report...",
+  ];
+  const [loadingMsgIndex, setLoadingMsgIndex] = useState(0);
 
   // Step 1 state — resume + portfolio, entered fresh per analysis (not saved to sources)
   const [resumeText, setResumeText] = useState("");
@@ -607,10 +663,8 @@ export default function AnalyzePage() {
             <Target size={22} className="text-primary" />
           </div>
           <div>
-            <p className="text-sm font-semibold text-text">
-              {analysisStatus === "processing"
-                ? "Analyzing your profile against the JD..."
-                : "Starting analysis..."}
+            <p className="text-sm font-semibold text-text transition-opacity duration-300">
+              {LOADING_MESSAGES[loadingMsgIndex]}
             </p>
             <p className="text-xs text-text-muted mt-1.5">
               This usually takes under a minute. Stay on this page.

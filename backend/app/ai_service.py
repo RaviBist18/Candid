@@ -4,6 +4,7 @@ Structured JSON output maps directly to Report/RoadmapItem schema.
 """
 
 import re
+import json
 
 from .db import supabase
 from .groq_client import call_groq_json, GroqCallError
@@ -76,6 +77,25 @@ def _format_sources(sources: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def call_groq_json_stream(messages: list[dict], temperature: float = 0.3):
+    """Yields raw text chunks as Groq generates them, for live display only.
+    Does NOT write to DB — run_gap_analysis's non-streaming call_groq_json
+    path remains source of truth for validation + persistence."""
+    from .groq_client import _client, MODEL
+
+    stream = _client.chat.completions.create(
+        model=MODEL,
+        messages=messages,
+        temperature=temperature,
+        response_format={"type": "json_object"},
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
 def _ensure_roadmap_coverage(result: dict, messages: list[dict]) -> dict:
     """If any missing_project has zero nested roadmap_items, retry Groq once
     with a correction note. If still incomplete after retry, log and
@@ -118,50 +138,63 @@ def _ensure_roadmap_coverage(result: dict, messages: list[dict]) -> dict:
     except GroqCallError as e:
         print(f"[WARN] retry call failed ({e}) — proceeding with original result")
         return result
-    """If any missing_project has zero roadmap_items, retry Groq once with a
-    correction note. If still incomplete after retry, log and proceed —
-    never block the whole analysis on this."""
-    project_titles = {p["title"] for p in result.get("missing_projects", [])}
-    covered_titles = {
-        item.get("project_title") for item in result.get("roadmap_items", [])
-    }
-    missing_coverage = project_titles - covered_titles
 
-    if not missing_coverage:
-        return result
 
-    print(
-        f"[WARN] roadmap_items missing coverage for: {missing_coverage} — retrying once"
-    )
+class ValidationError(Exception):
+    """Raised when submitted resume/JD content fails genuineness check."""
 
-    correction_note = {
-        "role": "user",
-        "content": (
-            "Your previous response left these missing_projects with zero "
-            f"roadmap_items: {list(missing_coverage)}. Every missing_project "
-            "must have at least 2-3 roadmap_items whose project_title matches "
-            "exactly. Return the full corrected JSON object again, same shape "
-            "as before, no preamble."
-        ),
-    }
-    retry_messages = messages + [correction_note]
+    pass
+
+
+VALIDATION_SYSTEM_PROMPT = """You check whether submitted text is a genuine \
+resume and a genuine job description, or meaningless/placeholder/gibberish \
+content (random characters, lorem ipsum, keyboard mashing, single repeated \
+words, or text unrelated to careers/jobs entirely).
+
+Respond ONLY with a JSON object, no preamble:
+{"resume_valid": bool, "jd_valid": bool, "reason": str}
+
+reason: if either is invalid, one short plain sentence explaining what's \
+wrong with which field. If both valid, empty string.
+
+Be lenient — a short but genuine resume (even just a few real bullet points \
+or a brief real work history) is valid. A short but genuine job description \
+(even just a title + a couple real requirements) is valid. Only flag actual \
+gibberish, placeholder text, or content with zero real resume/job content."""
+
+
+def validate_analysis_inputs(resume_text: str, job_description: str) -> None:
+    """Raises ValidationError if either input looks like gibberish/placeholder
+    rather than genuine content. Fast, cheap Groq call — runs before the
+    expensive full gap-analysis pipeline."""
+    from .groq_client import _client, MODEL
+
+    messages = [
+        {"role": "system", "content": VALIDATION_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": f"RESUME:\n{resume_text}\n\nJOB DESCRIPTION:\n{job_description}",
+        },
+    ]
 
     try:
-        retry_result = call_groq_json(retry_messages)
-        retry_titles = {
-            item.get("project_title") for item in retry_result.get("roadmap_items", [])
-        }
-        still_missing = project_titles - retry_titles
-        if still_missing:
-            print(
-                f"[WARN] retry still missing coverage for: {still_missing} — proceeding anyway"
-            )
-        else:
-            print("[INFO] retry fixed roadmap coverage")
-        return retry_result
-    except GroqCallError as e:
-        print(f"[WARN] retry call failed ({e}) — proceeding with original result")
-        return result
+        response = _client.chat.completions.create(
+            model=MODEL,
+            messages=messages,
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        result = json.loads(response.choices[0].message.content)
+    except Exception as e:
+        # Fail open — if validation call itself breaks, don't block real
+        # users from submitting real content. Log and let it through.
+        print(f"[WARN] validation call failed ({e}) — skipping validation")
+        return
+
+    if not result.get("resume_valid", True) or not result.get("jd_valid", True):
+        raise ValidationError(
+            result.get("reason") or "Resume or job description looks invalid."
+        )
 
 
 GAP_ANALYSIS_SYSTEM_PROMPT = """You are a senior technical recruiter and career \
@@ -242,14 +275,17 @@ what the data shows rather than relying only on general knowledge. If no such \
 data is provided, proceed using your own expertise as normal."""
 
 
-def run_gap_analysis(analysis_id: str, user_id: str) -> None:
-    supabase.table("analyses").update({"status": "processing"}).eq(
-        "id", analysis_id
-    ).execute()
-
+def build_analysis_messages(
+    analysis_id: str, user_id: str
+) -> tuple[list[dict], str, str] | None:
+    """Builds Groq messages for gap analysis. Returns (messages, resume_text,
+    job_description), or None if analysis row not found. Single source of
+    truth for message construction — shared by run_gap_analysis (DB-write
+    path) and the SSE stream endpoint (display-only path), so both produce
+    identical messages and therefore identical Groq responses."""
     analysis = supabase.table("analyses").select("*").eq("id", analysis_id).execute()
     if not analysis.data:
-        return
+        return None
 
     job_description = analysis.data[0]["job_description"]
     resume_text = analysis.data[0].get("resume_text", "")
@@ -283,6 +319,7 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
     except RetrievalError as e:
         print(f"RAG retrieval failed, proceeding ungrounded: {e}")
         grounding_context = ""
+
     messages = [
         {"role": "system", "content": GAP_ANALYSIS_SYSTEM_PROMPT},
         {
@@ -293,57 +330,23 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
         },
     ]
 
+    return messages, resume_text, job_description
+
+
+def run_gap_analysis(analysis_id: str, user_id: str) -> None:
+    supabase.table("analyses").update({"status": "processing"}).eq(
+        "id", analysis_id
+    ).execute()
+
+    built = build_analysis_messages(analysis_id, user_id)
+    if built is None:
+        return
+    messages, resume_text, job_description = built
+
     try:
         result = call_groq_json(messages)
-        print(
-            f"[DEBUG] missing_projects: {len(result.get('missing_projects', []))}, "
-            f"roadmap_items per project: "
-            f"{[len(p.get('roadmap_items', [])) for p in result.get('missing_projects', [])]}"
-        )
-
         result = _ensure_roadmap_coverage(result, messages)
-
-        ats_result = compute_ats_score(resume_text, job_description)
-        ats_score = ats_result["score"]
-
-        missing_projects = result.get("missing_projects", [])
-
-        report = (
-            supabase.table("reports")
-            .insert(
-                {
-                    "analysis_id": analysis_id,
-                    "missing_projects": missing_projects,
-                    "skill_gaps": result.get("skill_gaps", []),
-                    "ats_issues": result.get("ats_issues", []),
-                    "ats_score": ats_score,
-                    "ats_breakdown": ats_result,
-                }
-            )
-            .execute()
-        )
-        report_id = report.data[0]["id"]
-
-        rows = []
-        for project in missing_projects:
-            project_title = project.get("title", "")
-            for item in project.get("roadmap_items", []):
-                rows.append(
-                    {
-                        "report_id": report_id,
-                        "project_title": project_title,
-                        "title": item.get("title", ""),
-                        "description": item.get("description"),
-                        "is_checked": False,
-                        "order_index": item.get("order_index", 0),
-                    }
-                )
-        if rows:
-            supabase.table("roadmap_items").insert(rows).execute()
-
-        supabase.table("analyses").update({"status": "completed"}).eq(
-            "id", analysis_id
-        ).execute()
+        finalize_analysis_result(analysis_id, result, resume_text, job_description)
 
     except GroqCallError as e:
         supabase.table("analyses").update(
@@ -353,6 +356,56 @@ def run_gap_analysis(analysis_id: str, user_id: str) -> None:
         supabase.table("analyses").update(
             {"status": "failed", "error_message": f"Unexpected error: {e}"}
         ).eq("id", analysis_id).execute()
+
+
+def finalize_analysis_result(
+    analysis_id: str, result: dict, resume_text: str, job_description: str
+) -> None:
+    """ATS scoring + DB insert (report + roadmap_items) + status update.
+    Shared by run_gap_analysis (background-task path) and the SSE stream
+    endpoint (after its accumulated stream is fully parsed + validated) —
+    single source of truth so both paths write identical DB rows."""
+    ats_result = compute_ats_score(resume_text, job_description)
+    ats_score = ats_result["score"]
+
+    missing_projects = result.get("missing_projects", [])
+
+    report = (
+        supabase.table("reports")
+        .insert(
+            {
+                "analysis_id": analysis_id,
+                "missing_projects": missing_projects,
+                "skill_gaps": result.get("skill_gaps", []),
+                "ats_issues": result.get("ats_issues", []),
+                "ats_score": ats_score,
+                "ats_breakdown": ats_result,
+            }
+        )
+        .execute()
+    )
+    report_id = report.data[0]["id"]
+
+    rows = []
+    for project in missing_projects:
+        project_title = project.get("title", "")
+        for item in project.get("roadmap_items", []):
+            rows.append(
+                {
+                    "report_id": report_id,
+                    "project_title": project_title,
+                    "title": item.get("title", ""),
+                    "description": item.get("description"),
+                    "is_checked": False,
+                    "order_index": item.get("order_index", 0),
+                }
+            )
+    if rows:
+        supabase.table("roadmap_items").insert(rows).execute()
+
+    supabase.table("analyses").update({"status": "completed"}).eq(
+        "id", analysis_id
+    ).execute()
 
 
 ASSISTANT_SYSTEM_PROMPT = """You are a career mentor for job seekers — patient, \

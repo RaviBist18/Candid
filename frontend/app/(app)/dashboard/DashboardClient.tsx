@@ -42,6 +42,23 @@ type DashboardData = {
   sampleAnalysisId: string | null;
 };
 
+type TimePhase =
+  | "lateNight"
+  | "earlyMorning"
+  | "morning"
+  | "afternoon"
+  | "evening"
+  | "night";
+
+function getTimePhase(hour: number): TimePhase {
+  if (hour >= 23 || hour < 5) return "lateNight";
+  if (hour < 8) return "earlyMorning";
+  if (hour < 12) return "morning";
+  if (hour < 17) return "afternoon";
+  if (hour < 21) return "evening";
+  return "night"; // 21–22 (9pm–11pm)
+}
+
 export default function DashboardClient({ data }: { data: DashboardData }) {
   const {
     userName,
@@ -58,32 +75,49 @@ export default function DashboardClient({ data }: { data: DashboardData }) {
     `Great to have you, ${userName}. Let's map out your path forward.`,
     `Hello, ${userName}. Ready to see where you stand?`,
   ];
-  const nightGreetings = [
-    `Good to see you, ${userName}.`,
-    `Working late tonight, ${userName}?`,
-    `Welcome back, ${userName}, let's finish it well.`,
-  ];
-  const morningGreetings = [
-    `Good morning, ${userName}.`,
-    `Welcome back, ${userName}. Ready to start the day?`,
-    `Hello, ${userName}. Let's see what's next.`,
-  ];
-  const afternoonGreetings = [
-    `Good afternoon, ${userName}.`,
-    `Welcome back, ${userName}. Hope your day is going well.`,
-    `Hello, ${userName}. Let's continue where you left off.`,
-  ];
-  const eveningGreetings = [
-    `Good evening, ${userName}.`,
-    `Welcome back, ${userName}. Wrapping up for the day?`,
-    `Hello, ${userName}. Good to see you this evening.`,
-  ];
 
+  const greetingsByPhase: Record<TimePhase, string[]> = {
+    lateNight: [
+      `Still up, ${userName}?`,
+      `Late night grind, ${userName}.`,
+      `Welcome back, ${userName}. Late one tonight.`,
+    ],
+    earlyMorning: [
+      `Early start, ${userName}.`,
+      `Good morning, ${userName}. Up before the rush.`,
+      `Rise and grind, ${userName}.`,
+    ],
+    morning: [
+      `Good morning, ${userName}.`,
+      `Welcome back, ${userName}. Ready to start the day?`,
+      `Hello, ${userName}. Let's see what's next.`,
+    ],
+    afternoon: [
+      `Good afternoon, ${userName}.`,
+      `Welcome back, ${userName}. Hope your day is going well.`,
+      `Hello, ${userName}. Let's continue where you left off.`,
+    ],
+    evening: [
+      `Good evening, ${userName}.`,
+      `Welcome back, ${userName}. Wrapping up for the day?`,
+      `Hello, ${userName}. Good to see you this evening.`,
+    ],
+    night: [
+      `Good to see you, ${userName}.`,
+      `Working late tonight, ${userName}?`,
+      `Welcome back, ${userName}, let's finish it well.`,
+    ],
+  };
+
+  // mounted gates BOTH the random seed AND the hour read — hour comes from
+  // client clock only after hydration, so SSR/client never disagree.
   const [mounted, setMounted] = useState(false);
   const [greetingSeed, setGreetingSeed] = useState(0);
+  const [phase, setPhase] = useState<TimePhase>("morning");
 
   useEffect(() => {
     setGreetingSeed(Math.random());
+    setPhase(getTimePhase(new Date().getHours()));
     setMounted(true);
   }, []);
 
@@ -95,16 +129,8 @@ export default function DashboardClient({ data }: { data: DashboardData }) {
       ];
     }
     if (!userName) return "Welcome back.";
-    const hour = new Date().getHours();
-    const pool =
-      hour < 6
-        ? nightGreetings
-        : hour < 12
-          ? morningGreetings
-          : hour < 18
-            ? afternoonGreetings
-            : eveningGreetings;
-    if (!mounted) return pool[0];
+    if (!mounted) return `Welcome back, ${userName}.`; // neutral, no hour guess pre-hydration
+    const pool = greetingsByPhase[phase];
     return pool[Math.floor(greetingSeed * pool.length)];
   }
 

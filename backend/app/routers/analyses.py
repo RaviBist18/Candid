@@ -7,7 +7,17 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from ..db import supabase
 from ..models import AnalysisCreate, AnalysisOut
 from ..auth import get_current_user
-from ..ai_service import run_gap_analysis
+from ..ai_service import (
+    run_gap_analysis,
+    build_analysis_messages,
+    finalize_analysis_result,
+    call_groq_json_stream,
+    validate_analysis_inputs,
+    ValidationError,
+)
+from ..groq_client import GroqCallError
+from fastapi.responses import StreamingResponse
+import json
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
 
@@ -46,6 +56,11 @@ def create_analysis(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user),
 ):
+    try:
+        validate_analysis_inputs(analysis.resume_text, analysis.job_description)
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     payload = {
         "user_id": user_id,
         "job_title": analysis.job_title,
@@ -58,10 +73,59 @@ def create_analysis(
     if not result.data:
         raise HTTPException(status_code=500, detail="Failed to create analysis")
 
-    analysis_id = result.data[0]["id"]
-    background_tasks.add_task(run_gap_analysis, analysis_id, user_id)
-
+    # Background task no longer fired here — frontend calls
+    # GET /analyses/{id}/stream right after this returns, which both
+    # displays live and does the DB-write (see finalize_analysis_result).
     return result.data[0]
+
+
+@router.get("/{analysis_id}/stream")
+def stream_analysis(analysis_id: str, user_id: str = Depends(get_current_user)):
+    existing = (
+        supabase.table("analyses")
+        .select("id, resume_text, job_description")
+        .eq("id", analysis_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    built = build_analysis_messages(analysis_id, user_id)
+    if built is None:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    messages, resume_text, job_description = built
+
+    supabase.table("analyses").update({"status": "processing"}).eq(
+        "id", analysis_id
+    ).execute()
+
+    def event_generator():
+        buffer = ""
+        try:
+            for chunk in call_groq_json_stream(messages):
+                buffer += chunk
+                yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+
+            result = json.loads(buffer)
+            from ..ai_service import _ensure_roadmap_coverage
+
+            result = _ensure_roadmap_coverage(result, messages)
+            finalize_analysis_result(analysis_id, result, resume_text, job_description)
+            yield f"data: {json.dumps({'done': True})}\n\n"
+
+        except (GroqCallError, json.JSONDecodeError) as e:
+            supabase.table("analyses").update(
+                {"status": "failed", "error_message": str(e)}
+            ).eq("id", analysis_id).execute()
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        except Exception as e:
+            supabase.table("analyses").update(
+                {"status": "failed", "error_message": f"Unexpected error: {e}"}
+            ).eq("id", analysis_id).execute()
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.get("/roadmap-progress")
