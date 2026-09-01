@@ -45,6 +45,21 @@ Recruiters and ATS systems routinely screen out candidates over:
 All grounded in real job-posting and ATS-rule data retrieved via RAG — not a generic AI guess.
 
 _______________________________________________________________________________________________________________________________________________________
+## Screenshots
+
+| Dashboard | Connect Sources |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Connect Sources](docs/screenshots/sources-connect.png) |
+
+| Analysis Report | Skill Gap Analysis |
+|---|---|
+| ![Analysis Report](docs/screenshots/analysis-report.png) | ![Skill Gap Analysis](docs/screenshots/skill-gap-analysis.png) |
+
+| Roadmap | Ask a Question |
+|---|---|
+| ![Roadmap](docs/screenshots/roadmap.png) | ![Ask a Question](docs/screenshots/ask-chat.png) |
+
+_______________________________________________________________________________________________________________________________________________________
 
 
 ## What it does
