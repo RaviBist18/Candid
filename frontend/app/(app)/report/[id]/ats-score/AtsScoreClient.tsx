@@ -3,6 +3,14 @@
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Wrench, TrendingDown } from "lucide-react";
 
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 type LedgerIssue = {
   issue: string;
   points: number;
@@ -17,6 +25,7 @@ type Strength = {
 type AtsScoreData = {
   analysis_id: string;
   job_title: string;
+  created_at: string;
   score: number;
   baseline: number;
   strengths: Strength[];
@@ -46,11 +55,16 @@ export default function AtsScoreClient({ data }: { data: AtsScoreData }) {
 
       {/* HERO — score + verdict */}
       <div className="bg-surface border border-border rounded-xl shadow-card p-6 sm:p-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
-        <div>
-          <span className="text-label-sm uppercase text-primary">
+        <div className="flex flex-col gap-2">
+          <span className="text-label-sm uppercase text-primary tracking-wide">
             ATS Score
           </span>
-          <p className="mt-1.5 text-sm text-text-muted">{data.job_title}</p>
+          <h1 className="text-2xl font-bold text-text leading-snug">
+            {data.job_title}
+          </h1>
+          <p className="text-sm text-text-muted">
+            Analyzed {formatDate(data.created_at)}
+          </p>
         </div>
 
         <div className="flex flex-col items-start sm:items-end gap-2">

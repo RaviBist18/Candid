@@ -13,7 +13,7 @@ export default async function AtsScorePage({
 
   const { data: analysis } = await supabase
     .from("analyses")
-    .select("id, job_description")
+    .select("id, job_title, job_description, created_at")
     .eq("id", params.id)
     .eq("user_id", user!.id)
     .maybeSingle();
@@ -40,11 +40,11 @@ export default async function AtsScorePage({
     );
   }
 
-  const jd = analysis.job_description || "";
   const data = {
     ...report.ats_breakdown,
     analysis_id: params.id,
-    job_title: jd.length > 60 ? jd.slice(0, 60) + "..." : jd,
+    job_title: analysis.job_title,
+    created_at: analysis.created_at,
   };
 
   return <AtsScoreClient data={data} />;
