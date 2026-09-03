@@ -81,9 +81,9 @@ ________________________________________________________________________________
 > Numbers below are placeholders — swap with real counts before publishing.
 
 - ✅ **500+** job-posting chunks indexed in pgvector
-- ✅ **150+** ATS rule chunks indexed
+- ✅ **18+** ATS rule chunks indexed
 - ✅ **12** REST endpoints across 8 router modules
-- ✅ **~6s** average analysis time (JD → full report)
+- ✅ **~10s** average analysis time (JD → full report)
 - ✅ **RAG-grounded** — every skill gap and ATS flag cites retrieved job-posting/ATS-rule data, not model memory
 
 _______________________________________________________________________________________________________________________________________________________
