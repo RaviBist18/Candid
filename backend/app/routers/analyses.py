@@ -13,13 +13,36 @@ from ..ai_service import (
     finalize_analysis_result,
     call_groq_json_stream,
     validate_analysis_inputs,
+    validate_resume_input,
+    validate_jd_input,
     ValidationError,
 )
+from pydantic import BaseModel
 from ..groq_client import GroqCallError
 from fastapi.responses import StreamingResponse
 import json
 
 router = APIRouter(prefix="/analyses", tags=["analyses"])
+
+
+class ResumeValidateRequest(BaseModel):
+    resume_text: str
+
+
+class JDValidateRequest(BaseModel):
+    job_description: str
+
+
+@router.post("/validate/resume")
+def validate_resume(
+    body: ResumeValidateRequest, user_id: str = Depends(get_current_user)
+):
+    return validate_resume_input(body.resume_text)
+
+
+@router.post("/validate/jd")
+def validate_jd(body: JDValidateRequest, user_id: str = Depends(get_current_user)):
+    return validate_jd_input(body.job_description)
 
 
 @router.get("", response_model=list[AnalysisOut])
@@ -56,10 +79,6 @@ def create_analysis(
     background_tasks: BackgroundTasks,
     user_id: str = Depends(get_current_user),
 ):
-    try:
-        validate_analysis_inputs(analysis.resume_text, analysis.job_description)
-    except ValidationError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
     payload = {
         "user_id": user_id,

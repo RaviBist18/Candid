@@ -9,7 +9,7 @@ export default async function AnalysesPage() {
 
   const { data: analysesRows } = await supabase
     .from("analyses")
-    .select("id, job_description, created_at, status, is_sample")
+    .select("id, job_title, job_description, created_at, status, is_sample")
     .eq("user_id", user!.id)
     .order("created_at", { ascending: false });
 
@@ -52,10 +52,7 @@ export default async function AnalysesPage() {
     const p = progress.get(a.id);
     return {
       id: a.id,
-      job_title:
-        a.job_description.length > 60
-          ? a.job_description.slice(0, 60) + "..."
-          : a.job_description,
+      job_title: a.job_title,
       created_at: a.created_at,
       status: a.status,
       ats_score: atsByAnalysis.get(a.id) ?? null,

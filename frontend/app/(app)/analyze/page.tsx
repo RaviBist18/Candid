@@ -223,6 +223,7 @@ export default function AnalyzePage() {
 
   async function uploadResumeFile(file: File) {
     setUploadError("");
+    setResumeError("");
     const ext = file.name.toLowerCase();
     if (!ext.endsWith(".pdf") && !ext.endsWith(".docx")) {
       setUploadError("Only PDF or DOCX files are supported.");
@@ -265,6 +266,50 @@ export default function AnalyzePage() {
   const canGoNextFromStep1 = resumeText.trim().length > 0;
   const canGoNextFromStep2 =
     jobDescription.trim().length > 0 && jobTitle.trim().length > 0;
+
+  const [validating, setValidating] = useState(false);
+  const [resumeError, setResumeError] = useState("");
+  const [jdError, setJdError] = useState("");
+
+  async function handleStep1Next() {
+    setValidating(true);
+    setResumeError("");
+    try {
+      const res = await apiFetch("/analyses/validate/resume", {
+        method: "POST",
+        body: JSON.stringify({ resume_text: resumeText }),
+      });
+      if (!res.valid) {
+        setResumeError(res.reason || "Resume looks invalid.");
+        return;
+      }
+      setStep(2);
+    } catch (e: any) {
+      setResumeError(e.message || "Validation failed. Try again.");
+    } finally {
+      setValidating(false);
+    }
+  }
+
+  async function handleStep2Next() {
+    setValidating(true);
+    setJdError("");
+    try {
+      const res = await apiFetch("/analyses/validate/jd", {
+        method: "POST",
+        body: JSON.stringify({ job_description: jobDescription }),
+      });
+      if (!res.valid) {
+        setJdError(res.reason || "Job description looks invalid.");
+        return;
+      }
+      setStep(3);
+    } catch (e: any) {
+      setJdError(e.message || "Validation failed. Try again.");
+    } finally {
+      setValidating(false);
+    }
+  }
 
   async function handleSubmit() {
     setSubmitting(true);
@@ -412,7 +457,10 @@ export default function AnalyzePage() {
             {resumeMode === "paste" && (
               <textarea
                 value={resumeText}
-                onChange={(e) => setResumeText(e.target.value)}
+                onChange={(e) => {
+                  setResumeText(e.target.value);
+                  if (resumeError) setResumeError("");
+                }}
                 placeholder="Paste your resume text here..."
                 rows={8}
                 className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none"
@@ -460,6 +508,7 @@ export default function AnalyzePage() {
                       onClick={() => {
                         setResumeText("");
                         setUploadedFileName("");
+                        setResumeError("");
                       }}
                       className="text-xs text-primary hover:underline font-medium mt-1"
                     >
@@ -484,6 +533,12 @@ export default function AnalyzePage() {
               </label>
             )}
           </div>
+
+          {resumeError && (
+            <div className="rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+              {resumeError}
+            </div>
+          )}
 
           {/* Portfolio — fresh per analysis, not saved */}
           <div className="bg-surface border border-border rounded-xl shadow-card p-5">
@@ -558,6 +613,12 @@ export default function AnalyzePage() {
                 : `${jobDescription.trim().length.toLocaleString()} characters`}
             </span>
           </div>
+
+          {jdError && (
+            <div className="mt-3 rounded-lg border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger">
+              {jdError}
+            </div>
+          )}
         </div>
       )}
 
@@ -694,8 +755,14 @@ export default function AnalyzePage() {
           {step < totalSteps ? (
             <button
               type="button"
-              disabled={step === 1 ? !canGoNextFromStep1 : !canGoNextFromStep2}
-              onClick={() => setStep((s) => s + 1)}
+              disabled={
+                validating ||
+                (step === 1 ? !canGoNextFromStep1 : !canGoNextFromStep2)
+              }
+              onClick={() => {
+                if (step === 1) return handleStep1Next();
+                if (step === 2) return handleStep2Next();
+              }}
               className="flex items-center gap-2 bg-primary text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow-sm hover:bg-primary-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Next

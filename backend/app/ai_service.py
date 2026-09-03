@@ -197,6 +197,49 @@ def validate_analysis_inputs(resume_text: str, job_description: str) -> None:
         )
 
 
+RESUME_VALIDATION_PROMPT = """Check if this text is a genuine resume — real \
+work history, education, or skills — or meaningless/gibberish/placeholder \
+content (random chars, keyboard mashing, lorem ipsum, unrelated text).
+
+Respond ONLY JSON: {"valid": bool, "reason": str}
+reason: short sentence if invalid, empty string if valid.
+Be lenient — a short but genuine resume (even few real bullet points) is valid."""
+
+JD_VALIDATION_PROMPT = """Check if this text is a genuine job description — \
+real role/requirements — or meaningless/gibberish/placeholder content.
+
+Respond ONLY JSON: {"valid": bool, "reason": str}
+reason: short sentence if invalid, empty string if valid.
+Be lenient — short but genuine JD (even title + couple requirements) is valid."""
+
+
+def _validate_text(prompt: str, text: str) -> dict:
+    from .groq_client import _client, MODEL
+
+    try:
+        response = _client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": text},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        return json.loads(response.choices[0].message.content)
+    except Exception as e:
+        print(f"[WARN] validation call failed ({e}) — skipping validation")
+        return {"valid": True, "reason": ""}
+
+
+def validate_resume_input(resume_text: str) -> dict:
+    return _validate_text(RESUME_VALIDATION_PROMPT, resume_text)
+
+
+def validate_jd_input(job_description: str) -> dict:
+    return _validate_text(JD_VALIDATION_PROMPT, job_description)
+
+
 GAP_ANALYSIS_SYSTEM_PROMPT = """You are a senior technical recruiter and career \
 strategist with deep hiring experience at top engineering organizations. You are \
 reviewing a candidate's full profile against a specific target job description, \
