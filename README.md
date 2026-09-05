@@ -78,8 +78,6 @@ ________________________________________________________________________________
 
 ## Results
 
-> Numbers below are placeholders — swap with real counts before publishing.
-
 - ✅ **500+** job-posting chunks indexed in pgvector
 - ✅ **18+** ATS rule chunks indexed
 - ✅ **12** REST endpoints across 8 router modules
